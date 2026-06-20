@@ -98,9 +98,11 @@ Layout:
 
 | Path | Ring | Status |
 | --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession | Stage 1 ✅ |
-| `internal/store/` (planned) | `Store` driven-port + Markdown adapter | Stage 2 |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession, `Store` port | Stage 1 ✅ |
+| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), inline FS store | Stage 2 ✅ |
 | `cmd/enso/` (planned) | CLI driving adapter | Stage 4 |
+
+The Markdown format is a **public contract** (AMEND-1), pinned by a golden-file test (`internal/mdstore/testdata/golden_entry.md`; regenerate intentionally with `UPDATE_GOLDEN=1 go test ./internal/mdstore/ -run TestGolden`).
 
 ## Status
 
