@@ -83,9 +83,28 @@ bash scripts/enso-spec-drift.sh
 
 ---
 
+## Building
+
+Inside-out: the domain core (`internal/core`) has no outward dependencies and is fully unit-tested in isolation; adapters (Markdown store, CLI, OpenClaw plugin, graph store) are added in later stages.
+
+```bash
+make check      # fmt-check + vet + build + test + spec-drift (the full local gate)
+make test       # go test ./...
+make test-race  # go test -race -count=1 ./...
+make drift      # verify the unified-spec snapshot vs its sources
+```
+
+Layout:
+
+| Path | Ring | Status |
+| --- | --- | --- |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession | Stage 1 ✅ |
+| `internal/store/` (planned) | `Store` driven-port + Markdown adapter | Stage 2 |
+| `cmd/enso/` (planned) | CLI driving adapter | Stage 4 |
+
 ## Status
 
-Design phase. Phase 0 (the `active-memory` trigger) is live and collecting benchmark data in the host environment. No core implementation exists in this repo yet. Implementation is gated on explicit go-ahead.
+Design phase, early construction. Phase 0 (the `active-memory` trigger) is live and collecting benchmark data in the host environment. The domain core (Stage 1) exists and is tested; no adapters yet. Implementation continues stage-by-stage, gated on explicit go-ahead.
 
 ## License
 
