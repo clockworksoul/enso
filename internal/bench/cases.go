@@ -27,6 +27,18 @@ func SeedCases() []Case {
 	}
 }
 
+// TODO(NEIGHBOR): add the 2026-06-23 enso-repo-path miss as the first
+// NEIGHBOR-class case. Different mechanism than the STALE seeds: the correct
+// specific entry (child path `~/workspace/clockworksoul/enso`) exists and is
+// reachable by a one-hop inference from a held parent fact
+// (`~/workspace/clockworksoul/` = the OSS-repo root), but a vaguer parent entry
+// substitutes for the specific child (centroid-adjacent retrieval). Faithfully
+// modeling it needs the harness to exercise RELATES_TO / About-ref resolution
+// (parent->child) rather than SUPERSEDES, plus a model that rewards landing the
+// specific over the general. Deferred to a Dross Hour session so the
+// relationship-resolution design is done properly, not rushed. Logged in
+// research/2026-06-17-phase0-benchmark.md NEIGHBOR log.
+
 // mustEntry builds a validated entry, setting EncodedTime and the temporal
 // LastRefTime to encodedAt. Panics on invalid input (test-support only).
 func mustEntry(idLabel string, nt core.NodeType, content string, encodedAt time.Time, validUntil *time.Time, tags, about []string) core.Entry {
