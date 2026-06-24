@@ -78,39 +78,49 @@ func mustEntry(idLabel string, nt core.NodeType, content string, encodedAt time.
 // matching entry" model therefore picks the STALE item. Only supersession
 // (closing the Jun-16 task when the Jun-18 outcome landed) rescues it. We model
 // the stale item's re-surfacing by giving it an EncodedTime of the last scan.
+//
+// LOOP-CLOSING NOTE: this case is built by exercising the REAL capture path
+// (core.Entry.Correct), not by hand-assembling the SUPERSEDES edge. That makes
+// the benchmark an end-to-end proof: the same function that captures a live
+// correction produces the triple the Ensō model then scores. If capture and
+// consumption ever drift, this case breaks. Hand-wiring would have let them
+// drift silently.
 func adamHeadcountStale() Case {
+	jun16 := time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)
 	jun18 := time.Date(2026, 6, 18, 15, 0, 0, 0, time.UTC)
 	jun23 := time.Date(2026, 6, 23, 21, 0, 0, 0, time.UTC)
-	// The stale TODO line was last re-surfaced/scanned today, just before the
-	// query — so by write/touch-recency it looks fresher than the Jun-18 outcome.
-	jun23scan := time.Date(2026, 6, 23, 20, 0, 0, 0, time.UTC)
 
-	stale := mustEntry(
+	// The original TODO entry, encoded Jun 16 (before the outcome existed).
+	original := mustEntry(
 		"adam-headcount-todo",
 		core.TypeTask,
 		"Message Adam re: Axon headcount/investment. Target Jun 16; prep slipped.",
-		jun23scan, // re-surfaced on today's TODO scan → looks freshest to recency
-		&jun18,    // but it was actually closed when the Jun 18 outcome superseded it
+		jun16,
+		nil, // not yet closed at encode time
 		[]string{"work", "career", "team"},
 		[]string{"person:adam", "project:axon"},
 	)
 
-	current := mustEntry(
-		"adam-headcount-landed",
-		core.TypeDecision,
-		"Adam headcount ask landed at the Jun 18 1:1. Adam aligned; prefers moving someone internally; no specific person yet.",
-		jun18,
-		nil, // still current
-		[]string{"work", "career", "team"},
-		[]string{"person:adam", "project:axon"},
-	)
-
-	edge := core.Edge{
-		From:  current.ID,
-		Type:  core.EdgeSupersedes,
-		To:    string(stale.ID),
-		Extra: map[string]string{},
+	// Capture the correction THROUGH THE REAL PATH when the Jun-18 outcome landed.
+	stale, current, edge, err := original.Correct(core.Correction{
+		Kind:       core.CorrectRestate,
+		Content:    "Adam headcount ask landed at the Jun 18 1:1. Adam aligned; prefers moving someone internally; no specific person yet.",
+		NewLabel:   "adam headcount landed",
+		AsOf:       jun18,
+		Type:       core.TypeDecision,
+		Confidence: core.ConfHigh,
+	})
+	if err != nil {
+		panic(err)
 	}
+
+	// Reproduce the live failure dynamic: the closed TODO line keeps getting
+	// re-scanned, so by touch-recency it looks fresher than the Jun-18 outcome
+	// right up to the query. Correct leaves content/EncodedTime untouched (INV-2);
+	// we only bump the recency signal the baseline keys on.
+	jun23scan := time.Date(2026, 6, 23, 20, 0, 0, 0, time.UTC)
+	stale.EncodedTime = jun23scan
+	stale.Temporal.LastRefTime = jun23scan
 
 	return Case{
 		Name:       "adam-headcount-stale",
