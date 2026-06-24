@@ -27,17 +27,23 @@ func SeedCases() []Case {
 	}
 }
 
-// TODO(NEIGHBOR): add the 2026-06-23 enso-repo-path miss as the first
-// NEIGHBOR-class case. Different mechanism than the STALE seeds: the correct
-// specific entry (child path `~/workspace/clockworksoul/enso`) exists and is
-// reachable by a one-hop inference from a held parent fact
-// (`~/workspace/clockworksoul/` = the OSS-repo root), but a vaguer parent entry
-// substitutes for the specific child (centroid-adjacent retrieval). Faithfully
-// modeling it needs the harness to exercise RELATES_TO / About-ref resolution
-// (parent->child) rather than SUPERSEDES, plus a model that rewards landing the
-// specific over the general. Deferred to a Dross Hour session so the
-// relationship-resolution design is done properly, not rushed. Logged in
-// research/2026-06-17-phase0-benchmark.md NEIGHBOR log.
+// NeighborCases returns the NEIGHBOR-class benchmark cases: cases where the
+// failure is centroid-adjacent retrieval (right neighborhood, wrong specific)
+// rather than stale supersession. The current Ensō model does NOT solve these:
+// decay-ranked retrieval without query-content matching or specificity-preference
+// will pick the vague parent over the specific child whenever the parent looks
+// fresher. Both models score 0/N on this set. That is not a test failure; it is
+// an honest documentation of a known limitation and the target for Stage 5.
+//
+// Stage 5 target: specificity-aware retrieval that, given a specific query,
+// prefers the more specific matching entry over its vaguer parent even when the
+// parent is fresher. Options include semantic/content matching or graph traversal
+// from parent to child via OWNS/RELATES_TO edges.
+func NeighborCases() []Case {
+	return []Case{
+		ensōRepoPathNeighbor(),
+	}
+}
 
 // mustEntry builds a validated entry, setting EncodedTime and the temporal
 // LastRefTime to encodedAt. Panics on invalid input (test-support only).
@@ -133,71 +139,146 @@ func adamHeadcountStale() Case {
 	}
 }
 
-// Case 2 — the Ed Sandoval Neo4j-blog timeline STALE miss (2026-06-23).
+// Case 2 — the Ed Sandoval Neo4j-blog timeline miss (2026-06-23).
 //
 // What was asked (implicitly, while drafting the Ed email): whose court is the
-// blog post in / what's the latest state of the Ed thread?
-// The drafted email opened with "apologies for the gap on my end," implying the
-// ball was on Matt's side. What was true: the May 26 leg (Ed owes guest-post
-// terms) meant the open dependency was on ED's side. The model's recall of the
-// thread state was stale: it had Apr 28 + May 29 but the May 26 leg recolored
-// who-owes-whom.
+// blog post in? The drafted email opened "apologies for the gap on my end,"
+// implying Matt owed the next move. What was true: the May 26 thread leg
+// (Ed owes guest-post terms) meant the open dependency was on ED's side.
 //
-// Shape: an earlier "state of thread" entry (pre-May-26 understanding: Matt to
-// follow up) superseded by the corrected timeline entry (Ed owes terms since
-// May 26). Query is Jun 23.
+// This is a CorrectReframe: the underlying facts did not change (Matt asked
+// May 26; Ed went silent). The *interpretation* of whose-court was wrong.
+// That is the defining characteristic of the reframe class: same facts,
+// corrected frame. The hazard is exactly what the CorrectionKind docs warn:
+// nothing looked obviously outdated, so recency is maximally misleading.
+//
+// The stale belief was re-affirmed up to draft-time (looks freshest); the
+// corrected fact (true since May 26) is OLDER by write-time. Only
+// supersession surfaces it.
 func edSandovalTimelineStale() Case {
 	jun23 := time.Date(2026, 6, 23, 17, 0, 0, 0, time.UTC)
-	// The stale "Matt owes" understanding was the operative recalled state and
-	// kept being re-affirmed whenever the thread came up, so by touch-recency it
-	// looks current right up to the query. Model its last touch as just before
-	// the query (the moment the email draft opened with "apologies for the gap
-	// on my end").
 	jun23affirm := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
 
-	// The stale understanding: the felt state was "Matt needs to move this
-	// forward" (the May 26 leg, where Ed owes the guest-post terms, was not
-	// captured in memory — so the recalled thread-state defaulted to Matt-owes).
-	stale := mustEntry(
+	// The stale reframe: "Matt needs to move this forward."
+	// Kept being re-affirmed at every thread reference, so by touch-recency
+	// it looks perpetually current right up to the query.
+	original := mustEntry(
 		"ed-thread-matt-owes",
 		core.TypeFact,
 		"Neo4j blog: internal Yext legal cleared. Next action felt to be on Matt to push the thread forward.",
-		jun23affirm, // re-affirmed at draft time → looks freshest to recency
-		&jun23,      // corrected later on Jun 23 when the May 26 leg surfaced
+		jun23affirm,
+		nil, // not yet closed before the correction is applied
 		[]string{"work", "omega", "career"},
 		[]string{"person:ed-sandoval", "project:neo4j-blog"},
 	)
 
-	// The correct fact has been TRUE since May 26 (Ed owes the guest-post terms),
-	// even though it surfaced into memory only on Jun 23. Encode it at its true
-	// origin (May 26) so it is OLDER by write-time than the freshly re-affirmed
-	// stale belief — this is what defeats a recency heuristic: the correct answer
-	// is the older one, and only supersession/validity (not recency) surfaces it.
+	// The corrected fact has been TRUE since May 26 (Ed owes the guest-post
+	// terms, and went silent). EventTime = May 26 (when it became true in the
+	// world); AsOf = Jun 23 (when the reframe was captured). The EventTime
+	// distinction is the reason CorrectReframe exists: the corrected fact is
+	// older by world-time than the stale belief, even though it is captured now.
 	may26 := time.Date(2026, 5, 26, 14, 0, 0, 0, time.UTC)
-	current := mustEntry(
-		"ed-thread-ed-owes-terms",
-		core.TypeFact,
-		"Neo4j blog: open dependency is on ED's side. Matt asked May 26 for Neo4j guest-post submission terms; Ed punted to DevRel and went silent ~4 weeks.",
-		may26,
-		nil, // current
-		[]string{"work", "omega", "career"},
-		[]string{"person:ed-sandoval", "project:neo4j-blog"},
-	)
-
-	edge := core.Edge{
-		From:  current.ID,
-		Type:  core.EdgeSupersedes,
-		To:    string(stale.ID),
-		Extra: map[string]string{},
+	stale, current, edge, err := original.Correct(core.Correction{
+		Kind:      core.CorrectReframe,
+		Content:   "Neo4j blog: open dependency is on ED's side. Matt asked May 26 for Neo4j guest-post submission terms; Ed punted to DevRel and went silent ~4 weeks. Ball in Ed's court, not Matt's.",
+		NewLabel:  "ed thread ed owes terms",
+		AsOf:      jun23,
+		EventTime: &may26, // the corrected fact became true May 26, not Jun 23
+	})
+	if err != nil {
+		panic(err)
 	}
 
 	return Case{
-		Name:       "ed-sandoval-timeline-stale",
+		Name:       "ed-sandoval-timeline-reframe",
 		MissClass:  "STALE",
 		Query:      "whose court is the Neo4j blog post in?",
 		AsOf:       jun23,
 		WantID:     current.ID,
 		Candidates: []core.Entry{stale, current},
 		Edges:      []core.Edge{edge},
+	}
+}
+
+// ensōRepoPathNeighbor — the enso-repo-path NEIGHBOR miss (2026-06-23).
+//
+// What happened: asked where the enso repo lives locally. I held a parent fact
+// ("Matt's clockworksoul OSS repos live under ~/workspace/clockworksoul/") but
+// failed the one-hop to the specific child
+// ("the enso repo is at ~/workspace/clockworksoul/enso"), confabulating "not
+// found" and running two SIGKILL'd find-hunts. The active-memory plugin even
+// surfaced the parent fact in the same turn.
+//
+// This is the DRM/centroid-adjacent signature: the parent entry matches the
+// query neighborhood ("where do clockworksoul repos live?") and it is FRESHER
+// by touch (it is general background knowledge that keeps being referenced),
+// so both recency-baseline and the current Ensō model (decay-ranked) prefer
+// it over the specific child. Neither model solves this case.
+//
+// WHY NEITHER MODEL SOLVES IT: the Ensō model's SUPERSEDES+IsCurrent+decay
+// pipeline addresses STALE pairs (wrong entry is closed). Here BOTH entries
+// are current; no SUPERSEDES edge exists. The failure is specificity-blindness:
+// "repos under ~/workspace/clockworksoul/" is a vaguer match than "the enso
+// repo at ~/workspace/clockworksoul/enso," but the current ranker has no
+// query-content matching or specificity-preference layer to prefer the specific.
+//
+// STAGE 5 TARGET: specificity-aware ranking that, for a specific query,
+// prefers the more specific matching entry over its vaguer parent even when
+// the parent is fresher. Approaches: semantic content-match scoring, graph
+// traversal from parent to child via OWNS edges, or a specificity-boost
+// proportional to About-ref match depth.
+func ensōRepoPathNeighbor() Case {
+	// The parent fact: general background knowledge, kept being referenced,
+	// so by touch-recency it looks perpetually fresh.
+	jun10 := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	jun23query := time.Date(2026, 6, 23, 13, 50, 0, 0, time.UTC) // the miss instant
+
+	parent := mustEntry(
+		"clockworksoul-oss-root",
+		core.TypeFact,
+		"Matt's clockworksoul OSS repos live under ~/workspace/clockworksoul/ on the local machine.",
+		jun10,
+		nil,
+		[]string{"workspace", "repos", "clockworksoul"},
+		[]string{"project:clockworksoul"},
+	)
+	// The parent keeps being referenced (it is general infrastructure knowledge)
+	// so it looks freshest at query time. Both models key on this and pick it.
+	parent.Temporal.LastRefTime = jun23query.Add(-5 * time.Minute) // touched just before the query
+
+	// The specific child fact: encoded earlier, less-frequently-touched, therefore
+	// looks staler by recency even though it is the correct answer.
+	may28 := time.Date(2026, 5, 28, 9, 0, 0, 0, time.UTC)
+	child := mustEntry(
+		"enso-repo-local-path",
+		core.TypeFact,
+		"The Ensō repo (github.com:clockworksoul/enso) is cloned locally at ~/workspace/clockworksoul/enso. Module: github.com/clockworksoul/enso, Go 1.26.",
+		may28,
+		nil,
+		[]string{"workspace", "repos", "clockworksoul", "enso"},
+		[]string{"project:enso", "project:clockworksoul"},
+	)
+	// Child is correctly encoded but less recently touched: it was written once
+	// and not re-surfaced frequently, so decay leaves it lower than the parent.
+	// No bump since creation.
+
+	// The OWNS edge records the parent->child structural relationship.
+	// The current Ensō model does not traverse this edge; it is included
+	// here for Stage 5 to key on.
+	ownsEdge := core.Edge{
+		From:  parent.ID,
+		Type:  core.EdgeOwns,
+		To:    string(child.ID),
+		Extra: map[string]string{},
+	}
+
+	return Case{
+		Name:       "enso-repo-path-neighbor",
+		MissClass:  "NEIGHBOR",
+		Query:      "where does the enso repo live locally?",
+		AsOf:       jun23query,
+		WantID:     child.ID,
+		Candidates: []core.Entry{parent, child},
+		Edges:      []core.Edge{ownsEdge},
 	}
 }

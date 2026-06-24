@@ -98,6 +98,50 @@ func TestBenchmark_CorrectionCaptureIsLoadBearing(t *testing.T) {
 		enso.Score(), enso.TopHits, enso.Total)
 }
 
+// TestBenchmark_NeighborCases_DocumentKnownLimitation documents that NEITHER
+// the baseline nor the current Ensō model solves NEIGHBOR-class misses. This
+// is not a test failure: it is an honest, versioned record of a known limitation
+// and the target specification for Stage 5.
+//
+// NEIGHBOR failure mode: a vaguer parent entry (centroid-adjacent to the query)
+// is preferred over the specific correct child because the parent is fresher.
+// The current Ensō model's SUPERSEDES+IsCurrent+decay pipeline only fixes STALE
+// pairs. It has no query-content matching or specificity-preference layer.
+//
+// Stage 5 will be scored against this corpus. A change "fixes NEIGHBOR" iff
+// EnsoModel scores > 0/N here while EnsoBeatsBaseline stays 2/2.
+func TestBenchmark_NeighborCases_DocumentKnownLimitation(t *testing.T) {
+	cases := NeighborCases()
+	if len(cases) == 0 {
+		t.Fatal("no neighbor cases")
+	}
+
+	baseline := Run(BaselineModel{}, cases)
+	enso := Run(EnsoModel{}, cases)
+
+	t.Logf("NEIGHBOR corpus size: %d", len(cases))
+	t.Logf("%-24s precision@1 = %.2f (%d/%d) failures=%v",
+		baseline.Model, baseline.Score(), baseline.TopHits, baseline.Total, baseline.Failures)
+	t.Logf("%-24s precision@1 = %.2f (%d/%d) failures=%v",
+		enso.Model, enso.Score(), enso.TopHits, enso.Total, enso.Failures)
+
+	// Both models should fail on all NEIGHBOR cases with the current implementation.
+	// If this assertion ever breaks, it means one of two things:
+	// (a) a Stage 5 specificity fix was added and is working (great, update this test), or
+	// (b) the NEIGHBOR case accidentally resolved itself through unrelated changes (investigate).
+	if enso.Score() > 0 {
+		t.Logf("NOTE: Ensō scored > 0 on NEIGHBOR cases (%.2f). If Stage 5 specificity work landed, update this test to assert the new expected score.", enso.Score())
+	}
+	if baseline.Score() > 0 {
+		t.Logf("NOTE: baseline scored > 0 on NEIGHBOR cases (%.2f) — case may no longer be discriminating.", baseline.Score())
+	}
+	// The key invariant to preserve: STALE cases stay solved while NEIGHBOR is not yet solved.
+	stale := Run(EnsoModel{}, SeedCases())
+	if stale.Score() != 1.0 {
+		t.Errorf("STALE regression: Ensō dropped below 1.0 on seed cases while working on NEIGHBOR (%.2f)", stale.Score())
+	}
+}
+
 // TestBenchmark_DecayTiebreakWithinCurrent sanity-checks that when two entries
 // are BOTH current (no supersession), the Ensō model falls back to decay-
 // strength ranking via core.Rank, and a more-recently-referenced entry ranks
