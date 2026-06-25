@@ -1,9 +1,32 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+// stubStore is a minimal in-package Store implementation for testing
+// CommitCorrection without importing memstore (which would create an import cycle).
+type stubStore struct {
+	entries []Entry
+	edges   []Edge
+	appendErr error // if non-nil, Append returns this error
+}
+
+func (s *stubStore) Append(_ context.Context, entries []Entry, edges []Edge) error {
+	if s.appErr() != nil {
+		return s.appErr()
+	}
+	s.entries = append(s.entries, entries...)
+	s.edges = append(s.edges, edges...)
+	return nil
+}
+func (s *stubStore) appErr() error { return s.appendErr }
+func (s *stubStore) Load(_ context.Context) ([]Entry, []Edge, error) {
+	return s.entries, s.edges, nil
+}
 
 // correctableEntry builds a valid "old" entry to be corrected, encoded on a fixed day.
 func correctableEntry(t *testing.T) Entry {
@@ -256,5 +279,128 @@ func TestCorrect_RoundTripLoop(t *testing.T) {
 	}
 	if survivors[0].ID != newer.ID {
 		t.Errorf("survivor = %q, want corrected entry %q", survivors[0].ID, newer.ID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CommitCorrection tests (persist path — Store.Append×3)
+// ---------------------------------------------------------------------------
+
+// TestCommitCorrection_HappyPath verifies that CommitCorrection atomically
+// persists all three components of the supersession triple. The store must
+// receive exactly two entries (closed + newer) and one edge in a single
+// Append, both entries must be structurally correct (closed has ValidUntil
+// set; newer is current), and the returned newer matches what was stored.
+func TestCommitCorrection_HappyPath(t *testing.T) {
+	old := correctableEntry(t)
+	asOf := time.Date(2026, 6, 25, 2, 0, 0, 0, time.UTC)
+	store := &stubStore{}
+
+	got, err := CommitCorrection(context.Background(), store, old, Correction{
+		Kind:     CorrectRestate,
+		Content:  "Adam headcount landed at Jun 18 1:1.",
+		NewLabel: "adam headcount landed commit",
+		AsOf:     asOf,
+	})
+	if err != nil {
+		t.Fatalf("CommitCorrection: %v", err)
+	}
+
+	// Store received one atomic write: 2 entries + 1 edge.
+	if len(store.entries) != 2 {
+		t.Errorf("store.entries = %d, want 2 (closed + newer)", len(store.entries))
+	}
+	if len(store.edges) != 1 {
+		t.Errorf("store.edges = %d, want 1 (SUPERSEDES)", len(store.edges))
+	}
+
+	// Identify closed vs newer by ValidUntil.
+	var closed, newer Entry
+	for _, e := range store.entries {
+		if e.ValidUntil != nil {
+			closed = e
+		} else {
+			newer = e
+		}
+	}
+	if closed.ID == "" {
+		t.Fatal("no closed entry in store (ValidUntil unset on both)")
+	}
+	if newer.ID == "" {
+		t.Fatal("no head (newer) entry in store (both have ValidUntil set)")
+	}
+
+	// Closed: ValidUntil == asOf, content preserved (INV-2).
+	if !closed.ValidUntil.Equal(asOf) {
+		t.Errorf("closed.ValidUntil = %v, want %v", closed.ValidUntil, asOf)
+	}
+	if closed.Content != old.Content {
+		t.Errorf("closed.Content mutated: got %q, want %q", closed.Content, old.Content)
+	}
+
+	// Newer: current, content corrected, ID matches returned value.
+	if !newer.IsCurrent(asOf.Add(time.Hour)) {
+		t.Errorf("newer must be current after asOf")
+	}
+	if got.ID != newer.ID {
+		t.Errorf("returned newer.ID = %q, stored newer.ID = %q (mismatch)", got.ID, newer.ID)
+	}
+
+	// Edge: SUPERSEDES from newer → old.
+	edge := store.edges[0]
+	if edge.Type != EdgeSupersedes {
+		t.Errorf("edge.Type = %q, want SUPERSEDES", edge.Type)
+	}
+	if edge.From != newer.ID {
+		t.Errorf("edge.From = %q, want newer %q", edge.From, newer.ID)
+	}
+	if edge.To != string(old.ID) {
+		t.Errorf("edge.To = %q, want old %q", edge.To, old.ID)
+	}
+}
+
+// TestCommitCorrection_BadCorrection verifies that an invalid Correction
+// (e.g. bad kind) causes CommitCorrection to return an error before touching
+// the store. The store must remain empty.
+func TestCommitCorrection_BadCorrection(t *testing.T) {
+	old := correctableEntry(t)
+	store := &stubStore{}
+
+	_, err := CommitCorrection(context.Background(), store, old, Correction{
+		Kind:     "invalid-kind",
+		Content:  "this should never land",
+		NewLabel: "bad",
+		AsOf:     time.Date(2026, 6, 25, 2, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid CorrectionKind, got nil")
+	}
+	if len(store.entries) != 0 || len(store.edges) != 0 {
+		t.Errorf("store was written on bad correction: entries=%d edges=%d",
+			len(store.entries), len(store.edges))
+	}
+}
+
+// TestCommitCorrection_StoreError verifies that a store failure is propagated
+// as an error. The returned Entry must be the zero value.
+func TestCommitCorrection_StoreError(t *testing.T) {
+	old := correctableEntry(t)
+	sentinel := errors.New("disk full")
+	store := &stubStore{appendErr: sentinel}
+
+	got, err := CommitCorrection(context.Background(), store, old, Correction{
+		Kind:     CorrectRestate,
+		Content:  "store fails",
+		NewLabel: "store error case",
+		AsOf:     time.Date(2026, 6, 25, 2, 1, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("expected store error, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error = %v; want to wrap sentinel %v", err, sentinel)
+	}
+	if got.ID != "" {
+		t.Errorf("returned newer on store error: ID = %q, want zero value", got.ID)
 	}
 }

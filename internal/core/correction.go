@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -114,6 +115,37 @@ type Correction struct {
 	// reframe class: the corrected fact is often OLDER than the stale belief by
 	// world-time even though it is captured now. nil leaves it unset.
 	EventTime *time.Time
+}
+
+// CommitCorrection is the I/O companion to Entry.Correct: it captures a
+// correction against old, produces the canonical supersession triple via
+// Entry.Correct, and atomically persists all three via store.Append. It is the
+// persist path that completes the capture loop:
+//
+//	DetectCorrection → Detection.ToCorrection → Entry.Correct → CommitCorrection
+//
+// The whole triple (closed, newer, edge) lands in one Append call, so the
+// store receives them atomically: either all three persist or none do. This
+// matches INV-2 (append-only) — CommitCorrection never splits the write across
+// two Append calls and never reads back via Load.
+//
+// On success it returns the new head entry (newer) so callers can log or
+// display what was written without reconstructing it. Callers that need to
+// inspect closed or edge before writing should call Entry.Correct directly,
+// then Append the triple themselves.
+//
+// Errors from Correct (invalid Correction input) are returned before the store
+// is touched. Store errors are wrapped and returned; the triple was produced in
+// memory but not persisted.
+func CommitCorrection(ctx context.Context, store Store, old Entry, c Correction) (newer Entry, err error) {
+	closed, newer, edge, err := old.Correct(c)
+	if err != nil {
+		return Entry{}, fmt.Errorf("commit correction: %w", err)
+	}
+	if err := store.Append(ctx, []Entry{closed, newer}, []Edge{edge}); err != nil {
+		return Entry{}, fmt.Errorf("commit correction: persist: %w", err)
+	}
+	return newer, nil
 }
 
 // Correct captures a correction against an existing entry, producing the
