@@ -129,9 +129,14 @@ func adamHeadcountStale() Case {
 	stale.Temporal.LastRefTime = jun23scan
 
 	return Case{
-		Name:       "adam-headcount-stale",
-		MissClass:  "STALE",
-		Query:      "what's the status of the Adam headcount item?",
+		Name:      "adam-headcount-stale",
+		MissClass: "STALE",
+		Query:     "what's the status of the Adam headcount item?",
+		// Faithful reconstruction of the Jun-18 correction utterance: the moment
+		// the outcome landed, the natural way it was stated. "actually" + the
+		// restated fact is the real shape of how this correction entered the
+		// conversation; it is NOT tuned to guarantee a detector hit.
+		Utterance:  "actually the Adam headcount ask already landed at the Jun 18 1:1",
 		AsOf:       jun23,
 		WantID:     current.ID,
 		Candidates: []core.Entry{stale, current},
@@ -190,9 +195,15 @@ func edSandovalTimelineStale() Case {
 	}
 
 	return Case{
-		Name:       "ed-sandoval-timeline-reframe",
-		MissClass:  "STALE",
-		Query:      "whose court is the Neo4j blog post in?",
+		Name:      "ed-sandoval-timeline-reframe",
+		MissClass: "STALE",
+		Query:     "whose court is the Neo4j blog post in?",
+		// Faithful reconstruction of the reframe utterance. This is the HARD case
+		// for the detector on purpose: a reframe rarely announces itself with a
+		// crisp "not X" — the facts didn't change, the frame did. If the detector
+		// MISSES this, that is the most valuable result in the experiment, because
+		// it shows the reframe class needs more than lexical markers.
+		Utterance:  "the ball is actually in Ed's court, not Matt's",
 		AsOf:       jun23,
 		WantID:     current.ID,
 		Candidates: []core.Entry{stale, current},

@@ -47,6 +47,20 @@ type Case struct {
 	AsOf   time.Time // the query time; decay + staleness evaluated at this instant
 	WantID core.ID   // the ground-truth correct entry's ID
 
+	// Utterance is the verbatim (faithfully reconstructed) correction sentence
+	// that, in the real conversation, would have triggered capture of the
+	// SUPERSEDES edge this case relies on. It is OPTIONAL and exists ONLY for the
+	// detector replay (TestDetector_*): it measures whether core.DetectCorrection
+	// would actually fire on the real language and resolve the stale target.
+	//
+	// Empty Utterance is meaningful, not missing: NEIGHBOR-class misses had NO
+	// correction utterance at all (the failure was confabulation, not a stale
+	// belief someone corrected), so there is nothing for a detector to detect.
+	// The detector replay skips empty-Utterance cases and reports them as
+	// "no utterance" rather than as detector misses — that distinction is itself
+	// a finding about which misses a correction-detector can and cannot address.
+	Utterance string
+
 	// Candidates are all entries that plausibly match the query and exist as of
 	// AsOf. Includes the correct entry AND the distractor(s) (e.g. the stale
 	// version). The benchmark asks: does the model rank WantID first?
