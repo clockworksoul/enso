@@ -198,12 +198,15 @@ func edSandovalTimelineStale() Case {
 		Name:      "ed-sandoval-timeline-reframe",
 		MissClass: "STALE",
 		Query:     "whose court is the Neo4j blog post in?",
-		// Faithful reconstruction of the reframe utterance. This is the HARD case
-		// for the detector on purpose: a reframe rarely announces itself with a
-		// crisp "not X" — the facts didn't change, the frame did. If the detector
-		// MISSES this, that is the most valuable result in the experiment, because
-		// it shows the reframe class needs more than lexical markers.
-		Utterance:  "the ball is actually in Ed's court, not Matt's",
+		// Faithful reconstruction of the reframe utterance. NOTE (2026-06-26): an
+		// earlier version of this fixture read "the ball is ACTUALLY in Ed's
+		// court" — the spurious "actually" tripped the bare-actually restate signal
+		// and mis-tagged the reframe as a restate. That was a FIXTURE bug, not a
+		// detector bug: the real correction did not lead with "actually," and the
+		// whose-court signal classifies the faithful sentence correctly as reframe.
+		// Keep this fixture honest — do not season it with markers the real
+		// utterance lacked just to make a signal fire.
+		Utterance:  "the ball is in Ed's court, not Matt's",
 		AsOf:       jun23,
 		WantID:     current.ID,
 		Candidates: []core.Entry{stale, current},
