@@ -19,11 +19,11 @@ import (
 // entry that is still OPEN, no SUPERSEDES edge yet, and a raw correction
 // utterance. It then runs the entire loop end to end:
 //
-//	1. DETECT   the utterance (confirm.Propose over the live store)
-//	2. RESOLVE  the open stale entry as a supersession target
-//	3. COMMIT   the correction (core.CommitCorrection — the real chokepoint)
-//	4. RECALL   re-rank with the Ensō model and assert the NEW head now wins,
-//	            and that the naive baseline would still have been fooled.
+//  1. DETECT   the utterance (confirm.Propose over the live store)
+//  2. RESOLVE  the open stale entry as a supersession target
+//  3. COMMIT   the correction (core.CommitCorrection — the real chokepoint)
+//  4. RECALL   re-rank with the Ensō model and assert the NEW head now wins,
+//     and that the naive baseline would still have been fooled.
 //
 // If this passes, the Phase-1 value claim ("Ensō recovers the current answer
 // where the flat model loses") is proven on one real case end to end — not

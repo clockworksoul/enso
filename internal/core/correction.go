@@ -69,9 +69,9 @@ func (k CorrectionKind) Valid() bool { return validCorrectionKinds[k] }
 // live in Entry.Extra so they survive the lossless round-trip (INV-1) without
 // requiring a schema change to the typed fields.
 const (
-	ExtraCorrectionKind  = "correction_kind"  // the CorrectionKind value
-	ExtraSupersededID    = "supersedes"        // the closed old entry's ID
-	ExtraCorrectionAsOf  = "correction_as_of"  // RFC3339 instant the correction was captured
+	ExtraCorrectionKind = "correction_kind"  // the CorrectionKind value
+	ExtraSupersededID   = "supersedes"       // the closed old entry's ID
+	ExtraCorrectionAsOf = "correction_as_of" // RFC3339 instant the correction was captured
 )
 
 // Correction is the input to Correct: the free-form signal that a held entry is

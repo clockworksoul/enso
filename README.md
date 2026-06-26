@@ -98,15 +98,34 @@ Layout:
 
 | Path | Ring | Status |
 | --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession, `Store` port | Stage 1 ✅ |
-| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), inline FS store | Stage 2 ✅ |
-| `cmd/enso/` (planned) | CLI driving adapter | Stage 4 |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Correct`/`CommitCorrection`), correction sensor (`DetectCorrection`), recall math (`StrengthAt`/`Rank`, decay fields written-but-inert until Phase 3), `Store` port | Stage 1 ✅ |
+| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore` | Stage 2 ✅ |
+| `internal/memstore/` | In-memory `Store` — test/speed double for the core and bench | ✅ |
+| `internal/confirm/` | Correction assembly — `TargetResolver`/`StoreResolver` + the pure `Proposal` value + `Propose()` (detect → resolve → Proposal; writes nothing) | ✅ (lean — see note) |
+| `internal/bench/` | Offline replay benchmark — the success metric (recall model vs. naive baseline) + the detector replay + the end-to-end capture proof | ✅ |
+| `cmd/enso/` (planned) | CLI / runnable driving adapter | Stage 4 — not started |
+
+> **`confirm` note (2026-06-26):** this package once held a full synchronous human-in-the-loop approval surface (a TTY interview, `Operator`/`Decision` seam, `Confirmer`/`HandleText` loop driver, auto-accept `Policy`). It was removed (~1,259 lines) under the **complexity-kills** principle: corrections are already human-gated by being *stated in conversation*, so a separate "approve each write at a terminal" ceremony solved a problem we don't have. The real workflow is capture-then-notify with reversible writes (INV-2). The deleted spine lives in git history and can be restored if a future validation step shows a confirmation gate is actually wanted.
 
 The Markdown format is a **public contract** (AMEND-1), pinned by a golden-file test (`internal/mdstore/testdata/golden_entry.md`; regenerate intentionally with `UPDATE_GOLDEN=1 go test ./internal/mdstore/ -run TestGolden`).
 
 ## Status
 
-Design phase, early construction. Phase 0 (the `active-memory` trigger) is live and collecting benchmark data in the host environment. The domain core (Stage 1) exists and is tested; no adapters yet. Implementation continues stage-by-stage, gated on explicit go-ahead.
+Early construction, **Phase-1 loop proven end-to-end on one real case.** Phase 0 (the `active-memory` trigger) is live and collecting benchmark data in the host environment. The domain core (Stage 1) and the Markdown store (Stage 2) exist and are fully tested.
+
+The headline (2026-06-26): the complete capture-and-recall arc runs end to end on a real miss. Starting from the *pre-correction* world (an open stale entry, no `SUPERSEDES` edge, a raw correction utterance), the loop **detects** the correction → **resolves** the open stale entry as the target → **commits** the supersession → and on a later recall, the Ensō model **ranks the corrected answer first while the naive recency baseline is still fooled by the stale entry** (`internal/bench/endtoend_test.go`). The Phase-1 value claim — *recover the current answer where the flat model loses* — is now a passing test, not an assumption. It is proven on **one** case; broadening the corpus is the next work (see below).
+
+No runnable surface yet (`cmd/` is unbuilt by design): the loop is validated in-memory first, and a runnable adapter is justified only once the loop it wraps is proven. Implementation continues stage-by-stage, gated on explicit go-ahead.
+
+## Next steps
+
+In priority order. The discipline (per **complexity kills, simplicity scales**): build the next thing only when current, documented evidence demands it; validate before building; stop at the seam.
+
+1. **Broaden the end-to-end proof past one case.** The loop is proven on the `adam-headcount` restate. Add pre-correction fixtures for the other real misses (notably the `ed-sandoval` *reframe*) and run them through the same end-to-end arc. One passing case is a proof of concept; a handful across miss-classes is a proof of robustness.
+2. **Content-aware target resolution — *only if* the broadened corpus demands it.** `StoreResolver` ranks candidates by decay strength, *blind to the correction's content*. With one plausible stale entry that's fine; with several, it can resolve the wrong target. The end-to-end test asserts target-correctness explicitly, so a multi-candidate fixture that mis-resolves will **fail loudly** — that failure is the signal to build content-aware resolution, and not before.
+3. **Then, and only then: wire a runnable surface (`cmd/`).** A one-shot harness that drives real conversation lines / the real miss log through `Propose` against a file-backed `FSStore`. Justified once the loop it wraps is proven across the corpus.
+4. **Parked until a consumer needs it:** reframe **content extraction** (the reframe detector signals fire but extract no `Content`, having no `captureRe`). No consumer needs the extracted statement yet (a human supplies it), so building extraction now would be speculative.
+5. **Deferred:** Phase 2 (graph `Store` behind KùzuDB) and Phase 3 (live decay texture) remain architectural / design-locked sketches. The decay fields are written-but-inert by deliberate design (no backfill later); do not wire them until DM-days of data show relevance-drift misses that supersession alone can't fix.
 
 ## License
 

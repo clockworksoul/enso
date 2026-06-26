@@ -4,7 +4,7 @@
 // the *correct, current* answer on queries where the naive flat model gets it
 // wrong?
 //
-// Why this exists
+// # Why this exists
 //
 // The live active-memory plugin is a black box (persistTranscripts:false, logs
 // frozen) — we cannot measure per-turn recall quality from deployment alone.
@@ -150,10 +150,10 @@ func (EnsoModel) Rank(candidates []core.Entry, edges []core.Edge, now time.Time)
 
 // Result is the outcome of running one Model over the whole corpus.
 type Result struct {
-	Model     string
-	Total     int
-	TopHits   int        // cases where WantID ranked #1
-	Failures  []string   // names of cases the model got wrong
+	Model    string
+	Total    int
+	TopHits  int      // cases where WantID ranked #1
+	Failures []string // names of cases the model got wrong
 }
 
 // Score returns TopHits/Total as a fraction in [0,1].

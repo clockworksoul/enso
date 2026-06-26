@@ -10,8 +10,8 @@ import (
 // stubStore is a minimal in-package Store implementation for testing
 // CommitCorrection without importing memstore (which would create an import cycle).
 type stubStore struct {
-	entries []Entry
-	edges   []Edge
+	entries   []Entry
+	edges     []Edge
 	appendErr error // if non-nil, Append returns this error
 }
 
@@ -147,7 +147,7 @@ func TestCorrect_ExplicitOverrides(t *testing.T) {
 		AsOf:       asOf,
 		Type:       TypeDecision,
 		Confidence: ConfLow,
-		Tags:       []string{},        // explicit clear
+		Tags:       []string{}, // explicit clear
 		About:      []string{"person:adam"},
 	})
 	if err != nil {
