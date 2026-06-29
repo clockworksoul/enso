@@ -51,7 +51,7 @@ func TestEndToEnd_ReframeRequiresOperatorContent(t *testing.T) {
 	// re-affirmed at every thread reference and so looks perpetually fresh —
 	// exactly the dynamic that made the real Jun-23 miss (the drafted email
 	// opened "apologies for the gap on my end," implying Matt owed the move).
-	may26 := time.Date(2026, 5, 26, 14, 0, 0, 0, time.UTC)  // when the reframed fact became true
+	may26 := time.Date(2026, 5, 26, 14, 0, 0, 0, time.UTC)       // when the reframed fact became true
 	jun23affirm := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC) // last re-affirmation of the stale belief
 	jun23 := time.Date(2026, 6, 23, 17, 0, 0, 0, time.UTC)       // the recall query (draft time)
 

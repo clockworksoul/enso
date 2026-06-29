@@ -142,6 +142,50 @@ func TestBenchmark_NeighborCases_DocumentKnownLimitation(t *testing.T) {
 	}
 }
 
+// TestBenchmark_Stage5_SpecificitySolvesNeighbor is the Stage 5 success
+// assertion. It proves the new claim with a number: the query-aware
+// specificity model ranks the specific child first on the NEIGHBOR/path case
+// where BOTH query-blind models fail — WITHOUT regressing the STALE corpus.
+//
+// Three things must all hold:
+//  1. Query-blind models still fail NEIGHBOR (the discriminating contrast).
+//  2. The Stage 5 query-aware model solves NEIGHBOR (precision@1 = 1.0).
+//  3. The Stage 5 model still scores 1.0 on the all-STALE seed corpus when
+//     replayed query-aware (the no-regression invariant) — supersession is
+//     applied BEFORE specificity, so the stale entry is dropped regardless of
+//     query content.
+func TestBenchmark_Stage5_SpecificitySolvesNeighbor(t *testing.T) {
+	neighbor := NeighborCases()
+
+	// (1) query-blind models fail NEIGHBOR.
+	blindBaseline := Run(BaselineModel{}, neighbor)
+	blindEnso := Run(EnsoModel{}, neighbor)
+	if blindBaseline.Score() != 0 || blindEnso.Score() != 0 {
+		t.Fatalf("precondition broken: query-blind models should fail NEIGHBOR "+
+			"(baseline=%.2f enso=%.2f) — case may no longer be discriminating",
+			blindBaseline.Score(), blindEnso.Score())
+	}
+
+	// (2) Stage 5 query-aware model solves NEIGHBOR.
+	stage5 := RunQueryAware(EnsoSpecificityModel{}, neighbor)
+	t.Logf("NEIGHBOR: %-32s precision@1 = %.2f (%d/%d) failures=%v",
+		stage5.Model, stage5.Score(), stage5.TopHits, stage5.Total, stage5.Failures)
+	if stage5.Score() != 1.0 {
+		t.Errorf("Stage 5 specificity model did not solve NEIGHBOR: %.2f (failures: %v)",
+			stage5.Score(), stage5.Failures)
+	}
+
+	// (3) No STALE regression: the Stage 5 model, replayed query-aware over the
+	//     all-STALE seed corpus, still gets every case right.
+	stage5Stale := RunQueryAware(EnsoSpecificityModel{}, SeedCases())
+	t.Logf("STALE:    %-32s precision@1 = %.2f (%d/%d) failures=%v",
+		stage5Stale.Model, stage5Stale.Score(), stage5Stale.TopHits, stage5Stale.Total, stage5Stale.Failures)
+	if stage5Stale.Score() != 1.0 {
+		t.Errorf("STALE regression under Stage 5 model: %.2f (failures: %v)",
+			stage5Stale.Score(), stage5Stale.Failures)
+	}
+}
+
 // TestBenchmark_DecayTiebreakWithinCurrent sanity-checks that when two entries
 // are BOTH current (no supersession), the Ensō model falls back to decay-
 // strength ranking via core.Rank, and a more-recently-referenced entry ranks

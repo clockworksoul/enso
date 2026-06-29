@@ -146,6 +146,72 @@ func (EnsoModel) Rank(candidates []core.Entry, edges []core.Edge, now time.Time)
 	return out
 }
 
+// --- Stage 5: query-aware specificity model -----------------------------------
+
+// QueryModel is a Model that ALSO consumes the query string, enabling
+// specificity (query-content matching). The base Model interface is query-blind
+// because the STALE pipeline (supersession + decay) needs no query content to
+// pick the current head. NEIGHBOR/path is different: the only thing that
+// separates the specific child from its vague parent IS the query ("enso"), so
+// Stage 5 has to see it. Kept as a SEPARATE interface so the existing Model /
+// Run path and every STALE assertion stay byte-for-byte unchanged.
+type QueryModel interface {
+	Name() string
+	RankQuery(query string, candidates []core.Entry, edges []core.Edge, now time.Time) []core.Entry
+}
+
+// EnsoSpecificityModel is the Stage 5 retrieval pipeline: the same staleness +
+// supersession filter as EnsoModel, then a SPECIFICITY-FIRST, decay-tiebroken
+// rank (core.RankBySpecificity) instead of pure decay (core.Rank).
+//
+// Why it is strictly safe on STALE cases: STALE cases are replayed with an
+// empty query (the recent/no-query mode), so every Specificity score is 0, the
+// primary key is constant, and RankBySpecificity falls through to the decay
+// tiebreaker — i.e. it is identical to EnsoModel on those cases. The only
+// behavior it CHANGES is when a real query token discriminates a specific child
+// from a vague parent — exactly the NEIGHBOR/path miss.
+type EnsoSpecificityModel struct{}
+
+func (EnsoSpecificityModel) Name() string { return "enso-specificity+staleness+decay" }
+
+// RankQuery implements QueryModel: filter-then-(specificity,decay)-rank.
+func (EnsoSpecificityModel) RankQuery(query string, candidates []core.Entry, edges []core.Edge, now time.Time) []core.Entry {
+	// 1. Same staleness/supersession filter as EnsoModel — a specific match that
+	//    has been superseded must still be dropped BEFORE specificity ranking.
+	superseded := map[core.ID]bool{}
+	for _, e := range edges {
+		if e.Type == core.EdgeSupersedes {
+			superseded[core.ID(e.To)] = true
+		}
+	}
+	kept := make([]core.Entry, 0, len(candidates))
+	for _, c := range candidates {
+		if !c.IsCurrent(now) {
+			continue
+		}
+		if superseded[c.ID] {
+			continue
+		}
+		kept = append(kept, c)
+	}
+
+	// 2. Specificity-first, decay-tiebroken rank over the survivors.
+	queryTerms := core.Tokenize(query)
+	scored := core.RankBySpecificity(kept, queryTerms, now)
+	out := make([]core.Entry, len(scored))
+	for i, s := range scored {
+		out[i] = s.Entry
+	}
+	return out
+}
+
+// RankQuery lets EnsoModel satisfy QueryModel too (it simply ignores the query),
+// so the harness can score the query-blind model on the same code path and show
+// that specificity is the load-bearing difference.
+func (m EnsoModel) RankQuery(_ string, candidates []core.Entry, edges []core.Edge, now time.Time) []core.Entry {
+	return m.Rank(candidates, edges, now)
+}
+
 // --- Scoring ------------------------------------------------------------------
 
 // Result is the outcome of running one Model over the whole corpus.
@@ -172,6 +238,22 @@ func Run(m Model, cases []Case) Result {
 	res := Result{Model: m.Name(), Total: len(cases)}
 	for _, c := range cases {
 		ranked := m.Rank(c.Candidates, c.Edges, c.AsOf)
+		if len(ranked) > 0 && ranked[0].ID == c.WantID {
+			res.TopHits++
+		} else {
+			res.Failures = append(res.Failures, c.Name)
+		}
+	}
+	return res
+}
+
+// RunQueryAware is Run for a QueryModel: it passes each case's Query into the
+// model so specificity can fire. Used to score the Stage 5 model. Scoring math
+// (precision@1) is identical to Run.
+func RunQueryAware(m QueryModel, cases []Case) Result {
+	res := Result{Model: m.Name(), Total: len(cases)}
+	for _, c := range cases {
+		ranked := m.RankQuery(c.Query, c.Candidates, c.Edges, c.AsOf)
 		if len(ranked) > 0 && ranked[0].ID == c.WantID {
 			res.TopHits++
 		} else {
