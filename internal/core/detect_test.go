@@ -146,6 +146,45 @@ func TestDetectCorrection_Table(t *testing.T) {
 			text:   "The factually correct number is 42.", // 'factually' must not match \bactually\b
 			wantIs: false,
 		},
+
+		// --- seam #0 regression: bare corrective assertions (held-out H1 + H2) ---
+		// These are the real Jun-25 STALE utterances that fired=false on the
+		// Jun-23 vocabulary. Seam #0 (Jun 30 Dross Hour) added the two signals
+		// that catch them. They are now pinned as regressions so any future
+		// detector edit cannot silently re-break these classes.
+		{
+			// H1: Granola-ban STALE. The correction is a bare reaffirmation:
+			// the thing "still works", implying the stored ban/removal is stale.
+			// No "actually", no "stale", no "scratch that" — just "still works".
+			name:     "still-works-bare-reaffirmation",
+			text:     "Granola still works and is the transcript source of record",
+			wantIs:   true,
+			wantConf: DetectWeak,
+			wantKind: CorrectRestate,
+		},
+		{
+			// H2: LeanCTX scope STALE. The correction is a scope-expansion:
+			// "does more than that now" + "undersells". No explicit marker.
+			name:     "scope-expansion-undersells",
+			text:     "LeanCTX does more than that now, the note undersells its current scope",
+			wantIs:   true,
+			wantConf: DetectWeak,
+			wantKind: CorrectRestate,
+		},
+
+		// --- adversarials for the two new signals ---
+		// "still" must not fire on non-affirmative-state verbs.
+		{
+			name:   "still-need-not-correction",
+			text:   "I still need to get around to that refactor.",
+			wantIs: false,
+		},
+		// "more than" without an (does|is|has) subject must not fire.
+		{
+			name:   "more-than-no-subject",
+			text:   "That bug affects more than one service.",
+			wantIs: false,
+		},
 	}
 
 	for _, tc := range cases {

@@ -114,13 +114,22 @@ func TestHeldOut_DetectorGeneralizes(t *testing.T) {
 	t.Logf("── held-out detector recall: fired %d/%d (strong %d/%d) ──",
 		fired, len(cases), strong, len(cases))
 
-	// FINDING-ORIENTED, not pass/fail: we EXPECT some of these held-out
-	// utterances to be missed by the Jun-23-grounded vocabulary (they are bare
-	// corrective assertions without explicit supersession markers). That is the
-	// experiment's value. The only hard floor: the harness must have measured
-	// real cases. Detector quality is read from the logged number, then decided.
 	if len(cases) == 0 {
 		t.Fatal("no held-out cases to measure")
+	}
+
+	// REGRESSION GUARD (added seam #0, Jun 30 Dross Hour). The original probe
+	// (Jun 29) documented that the Jun-23 vocabulary MISSED both held-out
+	// utterances ("still works", "does more than that now" / "undersells").
+	// Seam #0 explicitly extended the vocabulary to cover the bare-corrective-
+	// assertion class. These cases are now part of the regression corpus:
+	// the detector MUST fire on both. Any future vocabulary edit that silently
+	// un-catches either held-out case will fail this assertion, which is the
+	// intended protection. The detect_test.go table also pins each utterance
+	// as its own named regression case.
+	if fired != len(cases) {
+		t.Errorf("held-out detector regression: fired %d/%d — expected 2/2 after seam-#0 vocabulary extension (restate:still-affirmative + restate:scope-expansion)",
+			fired, len(cases))
 	}
 }
 

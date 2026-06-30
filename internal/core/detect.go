@@ -164,6 +164,34 @@ var correctionSignals = []correctionSignal{
 		confidence: DetectWeak,
 	},
 
+	// --- RESTATE: still-affirmative (bare "still works/applies/..." with no
+	// explicit supersession marker — the Granola-ban class of STALE miss where
+	// the correction is a reaffirmation that the thing is still operative,
+	// typically against a stored belief that it was banned/changed/removed).
+	// Verb list is deliberately narrow: "still" is high-frequency; only
+	// affirmative state-verbs create the correction-reaffirmation pattern.
+	// no captureRe — the corrected statement spans the whole sentence;
+	// the operator supplies Content from context when confirming.
+	{
+		name:       "restate:still-affirmative",
+		re:         regexp.MustCompile(`(?i)\bstill\s+(works?|applies?|holds?|runs?|active|valid|live|enabled|available|correct)\b`),
+		kind:       CorrectRestate,
+		confidence: DetectWeak,
+	},
+
+	// --- RESTATE: scope-expansion ("does more than that now", "undersells") ---
+	// Catches the LeanCTX class: a description "undersells" the current scope,
+	// or "X does more than that now" signals the stored scope is too narrow.
+	// Two distinct sub-patterns: (a) <subject> does/is/has more than
+	// <that/before/previously>; (b) the bare verb "undersells".
+	// no captureRe — the corrected description is always operator-supplied.
+	{
+		name:       "restate:scope-expansion",
+		re:         regexp.MustCompile(`(?i)\b(does|is|has)\s+more\s+than\s+(that|before|previously|what\s+was)|\bundersells?\b`),
+		kind:       CorrectRestate,
+		confidence: DetectWeak,
+	},
+
 	// --- REFRAME (whose-court / interpretation; weaker by nature) ---
 	{
 		name:       "reframe:whose-court",
