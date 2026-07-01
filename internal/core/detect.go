@@ -150,9 +150,25 @@ var correctionSignals = []correctionSignal{
 		confidence: DetectStrong,
 	},
 	{
+		// "correction:" / "correction," as a sentence-initial label. Kept
+		// separate from restate:stale-marker because the trailing \b in that
+		// signal fires AFTER a non-word character (colon/space), which makes
+		// \b fail: \b after punctuation needs a word-char next, but the space
+		// after 'correction: ' satisfies neither side of a word boundary. A
+		// sentence-initial anchor (^\s*) sidesteps the \b issue entirely and
+		// also correctly restricts the signal to the lead-marker case, where
+		// it is unambiguous (a mid-sentence 'correction:' is rarer and can
+		// share the stale-marker path once this fires first by strength).
+		name:       "restate:correction-prefix",
+		re:         regexp.MustCompile(`(?i)^\s*correction[,:\s]`),
+		captureRe:  regexp.MustCompile(`(?i)^\s*correction[,:\s]+(.+)$`),
+		kind:       CorrectRestate,
+		confidence: DetectStrong,
+	},
+	{
 		name:       "restate:stale-marker",
-		re:         regexp.MustCompile(`(?i)\b((is|are|was|were|'?s)? ?(stale|outdated|out of date)|no longer (true|the case|current|accurate)|scratch that|correction[,:\s])\b`),
-		captureRe:  regexp.MustCompile(`(?i)(?:scratch that|correction)[,:\.\s]+(.+)$`),
+		re:         regexp.MustCompile(`(?i)\b((is|are|was|were|'?s)? ?(stale|outdated|out of date)|no longer (true|the case|current|accurate)|scratch that)\b`),
+		captureRe:  regexp.MustCompile(`(?i)(?:scratch that)[,:\.\s]+(.+)$`),
 		kind:       CorrectRestate,
 		confidence: DetectStrong,
 	},
@@ -162,6 +178,34 @@ var correctionSignals = []correctionSignal{
 		captureRe:  regexp.MustCompile(`(?i)^\s*update[,:\s]+(.+)$`),
 		kind:       CorrectRestate,
 		confidence: DetectWeak,
+	},
+	// "let me update/correct/revise that" — a spoken correction preamble that
+	// names the corrective act before stating the fix. Weak because the same
+	// phrase appears in ordinary editing intent ("let me update that doc");
+	// the resolver will confirm whether a live stale entry exists to act on.
+	{
+		name:       "restate:let-me-update",
+		re:         regexp.MustCompile(`(?i)\blet me (update|correct|revise|amend) that\b`),
+		captureRe:  regexp.MustCompile(`(?i)\blet me (?:update|correct|revise|amend) that[,:\s]+(.+)$`),
+		kind:       CorrectRestate,
+		confidence: DetectWeak,
+	},
+	// "revised X: ..." / "revised number:" as a sentence-initial label, same
+	// anchor trick as restate:correction-prefix.
+	{
+		name:       "restate:revised-prefix",
+		re:         regexp.MustCompile(`(?i)^\s*revised\b`),
+		captureRe:  regexp.MustCompile(`(?i)^\s*revised\b[^:]*:\s*(.+)$`),
+		kind:       CorrectRestate,
+		confidence: DetectWeak,
+	},
+	// "I misspoke" — an explicit self-correction of a prior statement.
+	{
+		name:       "retract:misspoke",
+		re:         regexp.MustCompile(`(?i)\bi (misspoke|mis-spoke|said that wrong|stated that incorrectly)\b`),
+		captureRe:  regexp.MustCompile(`(?i)\bi (?:misspoke|mis-spoke|said that wrong|stated that incorrectly)[,;:\s—]+(.+)$`),
+		kind:       CorrectRetract,
+		confidence: DetectStrong,
 	},
 
 	// --- RESTATE: still-affirmative, CONTRAST-GATED (the Granola-ban class of
