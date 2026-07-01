@@ -212,6 +212,63 @@ func TestDetectCorrection_Table(t *testing.T) {
 	}
 }
 
+// TestDetectCorrection_SeamZeroPrecision is the FALSE-POSITIVE corpus for the
+// two seam-#0 signals (restate:still-affirmative, restate:scope-expansion).
+//
+// WHY THIS EXISTS. Seam #0 (Jun 30) broadened the vocabulary to catch the
+// bare-corrective-assertion STALE class ("X still works", "the note undersells
+// its scope"). A false-positive probe on 2026-07-01 found the FIRST cut of
+// those signals fired on 13/18 innocent status sentences ("the staging link is
+// still live", "that coupon is still valid", "the README undersells how good
+// this tool is"). Under this architecture's no-reconsolidation rule a
+// false-positive correction is uniquely costly, so the signals were re-cut to
+// require a CONTRAST/canonical-status cue (still-affirmative) or a stored-
+// ARTIFACT+SCOPE cue (scope-expansion). That took the probe to 0/18.
+//
+// This test pins the innocent corpus permanently: none of these ordinary
+// sentences may be classified as a correction. Any future re-broadening that
+// re-introduces a false positive fails here. It is the precision guard that
+// balances the recall guard in held_out_test.go (which pins the two REAL
+// utterances as must-fire). Together they fence the signal on both sides.
+func TestDetectCorrection_SeamZeroPrecision(t *testing.T) {
+	// Innocent sentences that share surface words with the seam-#0 signals but
+	// correct nothing. Every one must be DetectNone.
+	innocent := []string{
+		// "still <verb>" ordinary status / affirmation (no contrast, no canonical cue)
+		"The old migration script still works, so we can reuse it.",
+		"Good news, the staging link is still live.",
+		"Is the feature flag still active in prod?",
+		"That coupon is still valid until Friday.",
+		"The CI pipeline still runs on every push.",
+		"Yeah the API key still works, I just tested it.",
+		"The offer still holds if you want to pair tomorrow.",
+		"Confirmed the webhook endpoint is still available.",
+		"My argument still applies to the new design too.",
+		"The assertion still holds under the new schema.",
+		// "does/is/has more than" ordinary comparison (no note/now/current anchor)
+		"This service does more than the old one, which is why it's slower.",
+		"The new plan is more than we budgeted for.",
+		"Refactoring this has more than doubled the test count.",
+		"The dashboard does more than that already, we're fine.",
+		// "undersells/understates" of a QUALITY, not a stored note's scope
+		"Honestly the README undersells how good this tool is.",
+		"That demo really undersells the product.",
+		// near-miss control words
+		"I still need to finish the refactor.",
+		"We have more than enough time.",
+	}
+
+	for _, s := range innocent {
+		t.Run(s, func(t *testing.T) {
+			if d := DetectCorrection(s); d.IsCorrection {
+				t.Errorf("seam-#0 false positive: %q classified as %s/%s (signals=%v); "+
+					"innocent status/comparison sentences must be DetectNone",
+					s, d.Kind, d.Confidence, d.Signals)
+			}
+		})
+	}
+}
+
 // TestDetectCorrection_ExtractsContent verifies the corrected statement is
 // pulled out after the marker and normalized (trailing punctuation/quotes gone).
 func TestDetectCorrection_ExtractsContent(t *testing.T) {

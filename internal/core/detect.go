@@ -164,30 +164,57 @@ var correctionSignals = []correctionSignal{
 		confidence: DetectWeak,
 	},
 
-	// --- RESTATE: still-affirmative (bare "still works/applies/..." with no
-	// explicit supersession marker — the Granola-ban class of STALE miss where
-	// the correction is a reaffirmation that the thing is still operative,
-	// typically against a stored belief that it was banned/changed/removed).
-	// Verb list is deliberately narrow: "still" is high-frequency; only
-	// affirmative state-verbs create the correction-reaffirmation pattern.
-	// no captureRe — the corrected statement spans the whole sentence;
-	// the operator supplies Content from context when confirming.
+	// --- RESTATE: still-affirmative, CONTRAST-GATED (the Granola-ban class of
+	// STALE miss: a reaffirmation that a thing is still operative, standing
+	// AGAINST a stored belief that it was banned/removed/deprecated).
+	//
+	// PRECISION LESSON (Jul 1 Dross Hour). The original Jun-30 form was a bare
+	// `\bstill\s+(works?|applies?|...)\b`. An FP probe over 18 innocent status
+	// sentences ("the staging link is still live", "that coupon is still valid",
+	// "the API key still works") found it fired on 13/18 — a false-positive rate
+	// that is unacceptable under this architecture's no-reconsolidation rule
+	// (a wrong auto-surfaced correction is uniquely costly). A bare
+	// "X still works" is genuinely ambiguous on the utterance ALONE: only the
+	// resolver, which knows the currently-stored belief, can tell a
+	// reaffirmation-against-a-stale-note from an ordinary status remark.
+	//
+	// So the LEXICAL detector now fires ONLY when the utterance itself carries a
+	// contrastive or canonical-status cue that betrays it is pushing back on a
+	// prior claim: an explicit contrast conjunction ("despite", "even though"),
+	// a canonical-status assertion ("source of record", "still the canonical"),
+	// or an explicit "no longer/not banned|blocked|removed|deprecated". Bare
+	// "X still works" with no such cue is DELIBERATELY left below the detector's
+	// reach — catching it is the resolver's job (does this utterance contradict
+	// a current entry?), not the sensor's. Recall on the real H1 utterance is
+	// preserved because it says "...is the transcript source of record".
+	// no captureRe — the corrected statement is operator-supplied from context.
 	{
 		name:       "restate:still-affirmative",
-		re:         regexp.MustCompile(`(?i)\bstill\s+(works?|applies?|holds?|runs?|active|valid|live|enabled|available|correct)\b`),
+		re:         regexp.MustCompile(`(?i)\bstill\s+(works?|applies?|holds?|runs?|active|valid|live|enabled|available|correct|the\s+(source|canonical|default|standard))\b.*\b(despite|even though|source of record|canonical|no longer (banned|blocked|removed|deprecated)|not (banned|blocked|removed|deprecated))\b|\b(despite|even though)\b.*\bstill\s+(works?|applies?|holds?|runs?|active|valid|live|enabled|available|correct)\b`),
 		kind:       CorrectRestate,
 		confidence: DetectWeak,
 	},
 
-	// --- RESTATE: scope-expansion ("does more than that now", "undersells") ---
-	// Catches the LeanCTX class: a description "undersells" the current scope,
-	// or "X does more than that now" signals the stored scope is too narrow.
-	// Two distinct sub-patterns: (a) <subject> does/is/has more than
-	// <that/before/previously>; (b) the bare verb "undersells".
+	// --- RESTATE: scope-expansion, ARTIFACT-GATED (the LeanCTX class: a stored
+	// note/description "undersells" the current scope, or the tool "does more
+	// than that now").
+	//
+	// PRECISION LESSON (Jul 1 Dross Hour). The Jun-30 form `\bundersells?\b`
+	// (or a bare "does more than that") also over-fired: "the README undersells
+	// how good this tool is" and "the dashboard does more than that already" are
+	// ordinary remarks, not corrections of a stored note. The fix requires the
+	// undersells/understates verb to (a) name a stored ARTIFACT
+	// (note/doc/description/record/memory/entry/readme) AND (b) target that
+	// artifact's SCOPE/CAPABILITY/CURRENCY — i.e. the note is wrong about what
+	// the thing DOES, which is the correction — not a subjective quality ("how
+	// good"). The "does/is/has more than that" branch likewise requires a
+	// note/now/current anchor so it reads as a stored-scope correction, not a
+	// throwaway comparison. This took the combined seam-#0 FP rate from 13/18
+	// to 0/18 on the probe while keeping the real H2 utterance a hit.
 	// no captureRe — the corrected description is always operator-supplied.
 	{
 		name:       "restate:scope-expansion",
-		re:         regexp.MustCompile(`(?i)\b(does|is|has)\s+more\s+than\s+(that|before|previously|what\s+was)|\bundersells?\b`),
+		re:         regexp.MustCompile(`(?i)\b(note|doc|description|record|memory|entry|readme)\b[^.]*\b(undersells?|understates?|too narrow|out of date|outdated)\b[^.]*\b(scope|capabilit\w+|current|coverage|range|breadth|what it (does|can))\b|\b(does|is|has)\s+more\s+than\s+(that|before|previously|what\s+was)\b[^.]*\b(note|now|current)\b`),
 		kind:       CorrectRestate,
 		confidence: DetectWeak,
 	},
