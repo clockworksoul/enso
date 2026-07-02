@@ -191,6 +191,66 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+// ---------------------------------------------------------------------------
+// Contradiction resolution — the SEAM #0 completion (resolver-side)
+// ---------------------------------------------------------------------------
+
+// ProposeContradiction is the resolver-side companion to Propose for the
+// bare-reaffirmation STALE class that the lexical detector deliberately cannot
+// catch (see core/contradict.go). Instead of asking "does this text look like a
+// correction?" it asks the corpus-relative question "does this utterance affirm
+// the operative status of something a CURRENT stored entry says is defunct?" —
+// scanning the resolver's candidate set for a core.DetectContradiction hit.
+//
+// The canonical case is the Granola-ban H1 miss: the utterance "Granola still
+// works" carries no lexical correction marker, so Propose returns ok=false, but
+// a current stored entry asserts "Granola is banned," and THAT contradiction is
+// the STALE signal. ProposeContradiction finds it where Propose cannot.
+//
+// It writes nothing. ok is false when no stored entry is contradicted, so — like
+// Propose — it is cheap to call on every conversational line and is silent on
+// the common case. When ok is true, the returned Proposal's Detection comes
+// from Contradiction.ToDetection (always a restate, weak confidence, EMPTY
+// content: a contradiction establishes THAT the stored belief is stale but not
+// the corrected statement, so a consumer must supply content before committing —
+// the same detect-don't-decide guard the reframe class uses).
+//
+// Candidates holds the contradicted entries, best-first by the resolver's own
+// ordering; when more than one current entry is contradicted, all are surfaced
+// (ambiguity is a fact for a downstream consumer to resolve, not guessed here).
+func ProposeContradiction(ctx context.Context, r TargetResolver, text string, now time.Time) (Proposal, bool, error) {
+	// The resolver is used only to enumerate current candidates; contradiction
+	// detection does not depend on a Detection, so pass a zero one.
+	cands, err := r.Resolve(ctx, core.Detection{}, now)
+	if err != nil {
+		return Proposal{}, false, err
+	}
+	var (
+		hits     []core.Entry
+		best     core.Contradiction
+		haveBest bool
+	)
+	for _, e := range cands {
+		c := core.DetectContradiction(text, e, now)
+		if !c.IsContradiction {
+			continue
+		}
+		hits = append(hits, e)
+		if !haveBest {
+			best = c
+			haveBest = true
+		}
+	}
+	if !haveBest {
+		return Proposal{}, false, nil
+	}
+	return Proposal{
+		Detection:  best.ToDetection(),
+		Candidates: hits,
+		AsOf:       now,
+	}, true, nil
+}
+
 // Propose is the convenience that ties the surviving pieces together: detect a
 // correction in text, resolve its supersession targets, and return a Proposal.
 // It writes nothing. ok is false when the text carries no correction signal, so
