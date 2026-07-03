@@ -288,6 +288,89 @@ func TestDetectContradiction_EndToEndBarredWithoutContent(t *testing.T) {
 	}
 }
 
+// TestContradiction_ComplementaryToLexical is the LOAD-BEARING justification for
+// this whole file: it proves the resolver-side contradiction check is NOT
+// redundant with the lexical DetectCorrection path — the two have distinct,
+// complementary coverage, and there exists a real miss class that ONLY the
+// contradiction check catches.
+//
+// WHY THIS TEST EXISTS. A fair skeptic asks: "the held-out Granola case already
+// fires the lexical restate:still-affirmative signal (held_out_test.go asserts
+// detector 2/2) — so why build a second path at all?" The answer is that the
+// held-out utterance is the *full* form, "Granola still works AND IS THE
+// TRANSCRIPT SOURCE OF RECORD", whose "source of record" canonical-status cue is
+// exactly the contrast-gate the Jul 1 precision-hardening added to keep the
+// lexical signal from over-firing. Strip that cue to the genuinely BARE form —
+// "Granola still works" — and the lexical detector correctly goes SILENT (it has
+// no way, from the utterance alone, to tell a stale-note reaffirmation from an
+// ordinary status remark). That bare form is precisely where the contradiction
+// check earns its keep: the STORED "banned" belief supplies the missing half of
+// the evidence.
+//
+// This test pins that division of labor so a future edit cannot silently make
+// one path redundant, over-broaden the lexical signal back into FP territory, or
+// break the bare-form coverage the contradiction layer is the sole owner of.
+func TestContradiction_ComplementaryToLexical(t *testing.T) {
+	stored := storedNegation(t,
+		"granola-banned",
+		"Granola is banned per Yext policy (Jun 22). Default to the Zoom -> yext/transcripts replacement workflow.",
+		[]string{"work", "tools", "granola", "transcripts"},
+		[]string{"tool:granola", "policy:yext"},
+	)
+	now := now2026()
+
+	// Column 1: the genuinely BARE reaffirmation. This is the class the lexical
+	// detector deliberately cannot reach (contrast-gated on Jul 1). ONLY the
+	// contradiction check may fire — and it must, else the bare Granola-ban class
+	// has no home at all.
+	bareOnly := []string{
+		"Granola still works",
+		"Granola works again",
+	}
+	for _, u := range bareOnly {
+		if DetectCorrection(u).IsCorrection {
+			t.Errorf("lexical detector must stay SILENT on the bare form %q "+
+				"(firing here means the Jul 1 contrast-gate regressed into FP territory)", u)
+		}
+		if !DetectContradiction(u, stored, now).IsContradiction {
+			t.Errorf("contradiction check MUST own the bare form %q — it is the sole "+
+				"catcher of this class; a miss here means the bare Granola-ban STALE goes uncaught", u)
+		}
+	}
+
+	// Column 2: the FULL held-out form, with the "source of record" canonical cue.
+	// Here the lexical path legitimately fires (its gate is satisfied) AND the
+	// contradiction path also fires (stored negation present). Overlap on the
+	// cued form is fine and expected — the point is that Column 1 has NO lexical
+	// coverage, so the two paths are genuinely complementary, not duplicative.
+	full := "Granola still works and is the transcript source of record"
+	if !DetectCorrection(full).IsCorrection {
+		t.Errorf("lexical detector should fire on the cued full form %q "+
+			"(this is the held_out_test.go 2/2 assertion; a miss here means the "+
+			"restate:still-affirmative canonical-status cue regressed)", full)
+	}
+	if !DetectContradiction(full, stored, now).IsContradiction {
+		t.Errorf("contradiction check should also fire on %q (stored negation present)", full)
+	}
+
+	// Column 3: the same bare affirmation with NO stored negation to contradict.
+	// Neither path may fire — this is the ordinary-status-remark case both layers
+	// must stay silent on. (The lexical path is silent by its gate; the
+	// contradiction path is silent because the corpus supplies no negation.)
+	innocent := storedNegation(t, // reuse builder but with a NON-negation content
+		"granola-note",
+		"Granola is our meeting notetaker; scripts/granola.py reads the API.",
+		[]string{"tools", "granola"}, []string{"tool:granola"},
+	)
+	if DetectCorrection("Granola still works").IsCorrection {
+		t.Error("lexical must be silent on bare form regardless of corpus")
+	}
+	if DetectContradiction("Granola still works", innocent, now).IsContradiction {
+		t.Error("contradiction must be silent when the stored belief carries no negation " +
+			"(the corpus half of the evidence is absent)")
+	}
+}
+
 func containsStr(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {
