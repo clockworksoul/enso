@@ -128,3 +128,88 @@ func TestFabrication_AbstentionDoesNotOverfire(t *testing.T) {
 	}
 	t.Logf("precise+high-confidence+fresh anchor → ABSTAIN=%v (%s) — correctly answers instead of suppressing", abstain, why)
 }
+
+// --- Staged cases (not yet in FabricationCases; candidates for Jul 13 review) ---
+
+// TestStagedFabrication_NeoBlogOutline_PrecisionAtOneIsBlind mirrors
+// TestFabrication_PrecisionAtOneIsBlind for the staged Jul 3 case. The corpus
+// has exactly one matching entry (the Jun 22 anchor, specific and high-confidence
+// as-of-then) and a precision@1 ranker scores 1.0 — yet the fabrication still
+// happened in real life. Ranking cannot detect this case because the anchor IS
+// the correct, specific entry; it's just 11 days stale.
+func TestStagedFabrication_NeoBlogOutline_PrecisionAtOneIsBlind(t *testing.T) {
+	for _, c := range StagedFabricationCases() {
+		rankCase := Case{
+			Name:       c.Name,
+			MissClass:  c.MissClass,
+			Query:      c.Query,
+			AsOf:       c.AsOf,
+			WantID:     c.Anchor.ID,
+			Candidates: []core.Entry{c.Anchor},
+		}
+		baseline := Run(BaselineModel{}, []Case{rankCase})
+		enso := Run(EnsoModel{}, []Case{rankCase})
+		if baseline.Score() != 1.0 || enso.Score() != 1.0 {
+			t.Errorf("%s: expected both models to score 1.0, got baseline=%.2f enso=%.2f",
+				c.Name, baseline.Score(), enso.Score())
+		}
+		t.Logf("%s: precision@1 = 1.00 for BOTH models — the anchor is correct and specific; staleness is the only signal. Fabricated: %q. Truth: %q.",
+			c.Name, c.FabricatedAnswer[:60], c.TrueAnswer[:60])
+	}
+}
+
+// TestStagedFabrication_NeoBlogOutline_OnlyBranch3Fires is the key structural
+// finding for this case: the shouldAbstain heuristic fires via branch 3
+// (temporal decay) ONLY. Branches 1 and 2 do NOT fire because the anchor IS
+// specific (PreciseSupportExists=true) and IS high-confidence (ConfHigh) — it
+// was a real, precise, reliable entry as of Jun 22. The staleness after 11 days
+// (StrengthAt ≈ 0.1 < staleFloor 0.35) is the sole discriminating signal.
+// This validates branch 3 for the first time; Tipa validated branches 1+2.
+func TestStagedFabrication_NeoBlogOutline_OnlyBranch3Fires(t *testing.T) {
+	for _, c := range StagedFabricationCases() {
+		// Branch 1 should NOT fire: precise support exists.
+		if !c.PreciseSupportExists {
+			t.Errorf("%s: expected PreciseSupportExists=true (branch 1 should not fire), got false", c.Name)
+		}
+
+		// Branch 2 should NOT fire: anchor is high-confidence.
+		if c.Anchor.Confidence != core.ConfHigh {
+			t.Errorf("%s: expected ConfHigh anchor (branch 2 should not fire), got %q", c.Name, c.Anchor.Confidence)
+		}
+
+		// Branch 3 SHOULD fire: temporal decay below staleFloor.
+		strength := core.StrengthAt(c.Anchor, c.AsOf)
+		const staleFloor = 0.35
+		if strength >= staleFloor {
+			t.Errorf("%s: expected StrengthAt < %.2f (branch 3 should fire), got %.4f", c.Name, staleFloor, strength)
+		}
+
+		// Full abstention check: should abstain for the right reason.
+		abstain, why := shouldAbstain(c.Anchor, c.PreciseSupportExists, c.AsOf)
+		if !abstain {
+			t.Errorf("%s: abstention signal failed to fire; should have caught the stale narrative confabulation. reason=%q", c.Name, why)
+		}
+		t.Logf("%s: branch1(no-precise-support)=false branch2(low-conf)=false branch3(decay)=true strength=%.4f → ABSTAIN=%v (%s)",
+			c.Name, strength, abstain, why)
+	}
+}
+
+// TestStagedFabrication_NeoBlogOutline_SubtypeContrast documents the structural
+// contrast between the two FABRICATION subtypes. Both should abstain; they just
+// get there via different branches. This is a documentation test more than a
+// correctness check — it makes the contrast visible in the test output.
+func TestStagedFabrication_NeoBlogOutline_SubtypeContrast(t *testing.T) {
+	live := FabricationCases()         // Tipa-tenure: branches 1+2
+	staged := StagedFabricationCases() // Neo4j outline: branch 3 only
+
+	for _, c := range live {
+		abstain, why := shouldAbstain(c.Anchor, c.PreciseSupportExists, c.AsOf)
+		t.Logf("LIVE   %s: PreciseSupport=%v Confidence=%q Strength=%.4f → ABSTAIN=%v (%s)",
+			c.Name, c.PreciseSupportExists, c.Anchor.Confidence, core.StrengthAt(c.Anchor, c.AsOf), abstain, why)
+	}
+	for _, c := range staged {
+		abstain, why := shouldAbstain(c.Anchor, c.PreciseSupportExists, c.AsOf)
+		t.Logf("STAGED %s: PreciseSupport=%v Confidence=%q Strength=%.4f → ABSTAIN=%v (%s)",
+			c.Name, c.PreciseSupportExists, c.Anchor.Confidence, core.StrengthAt(c.Anchor, c.AsOf), abstain, why)
+	}
+}
