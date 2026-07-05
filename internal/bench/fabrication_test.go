@@ -65,6 +65,21 @@ func TestFabrication_PrecisionAtOneIsBlind(t *testing.T) {
 // it is to show that a SECOND signal — orthogonal to ranking — catches the case
 // that precision@1 cannot. Validation before construction: we measure whether
 // such a signal even discriminates before building anything elaborate.
+// volatileTypes is the closed set of node types that carry time-bound state
+// and are legitimately subject to temporal-staleness abstention (branch 3).
+// TypeFact is excluded: its content is expected to be immutable (birthdays,
+// hire dates, authored books). TypeInsight is excluded: insights are usually
+// stable knowledge claims, not decisions. TypePerson and TypeProject are
+// excluded pending a second real case involving mutable-role or project-status
+// confabulation — the FP probe (fabrication_branch3_fp_test.go) measured the
+// age-only predicate and found 6/6 FPs on TypeFact, all eliminated by this
+// volatility gate. TypeTask is the natural next candidate (tasks are
+// inherently time-bound) but has no corpus case yet; add it when a real
+// TypeTask confabulation provides the regression anchor.
+var volatileTypes = map[core.NodeType]bool{
+	core.TypeDecision: true,
+}
+
 func shouldAbstain(anchor core.Entry, preciseSupport bool, now time.Time) (bool, string) {
 	if !preciseSupport {
 		return true, "no entry directly supports a precise answer (only a vague anchor)"
@@ -72,9 +87,16 @@ func shouldAbstain(anchor core.Entry, preciseSupport bool, now time.Time) (bool,
 	if anchor.Confidence == core.ConfLow || anchor.Confidence == core.ConfMedium {
 		return true, "only support is a low/medium-confidence soft estimate"
 	}
+	// Branch 3: temporal staleness — only for volatile (time-bound) types.
+	// TypeFact is immutable by design; age alone does not make a birthday or
+	// location fabrication-prone. See fabrication_branch3_fp_test.go for the
+	// measured FP surface of the age-only predicate and why volatility, not
+	// age, is the right discriminant.
 	const staleFloor = 0.35
-	if s := core.StrengthAt(anchor, now); s < staleFloor {
-		return true, "only support is temporally stale (decayed below floor)"
+	if volatileTypes[anchor.Type] {
+		if s := core.StrengthAt(anchor, now); s < staleFloor {
+			return true, "only support is a volatile (time-bound) entry that has temporally decayed below floor"
+		}
 	}
 	return false, "precise, high-confidence, fresh support exists"
 }

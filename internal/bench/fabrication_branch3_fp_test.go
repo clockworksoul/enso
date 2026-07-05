@@ -109,16 +109,18 @@ func TestFabrication_Branch3_OverFiresOnEvergreenFacts(t *testing.T) {
 		}
 	}
 
-	// CURRENT REALITY: branch 3 over-fires on all of them. We pin this so the
-	// liability is documented and cannot silently change. This is the measured
-	// finding, not the desired end state.
-	if falsePositives != len(corpus) {
-		t.Errorf("expected branch 3 to (wrongly) fire on ALL %d evergreen facts under the current heuristic; got %d. "+
-			"If this dropped, branch 3 may have been fixed — flip this test to assert 0 false positives.",
-			len(corpus), falsePositives)
+	// FIXED REALITY (volatility gate, see shouldAbstain in fabrication_test.go):
+	// branch 3 is now gated on volatileTypes (TypeDecision only). TypeFact
+	// entries are exempt — age alone does not make a birthday fabrication-prone.
+	// The fix reduces FPs from 6/6 → 0/6 while preserving the Neo TypeDecision
+	// true positive (verified by TestFabrication_Branch3_NeoCaseStillFiresForTheRightReason).
+	if falsePositives != 0 {
+		t.Errorf("REGRESSION: expected branch 3 to fire on 0 evergreen facts after volatility gate; got %d. "+
+			"Check volatileTypes in fabrication_test.go — TypeFact must remain excluded.",
+			falsePositives)
 	}
-	t.Logf("BRANCH-3 FALSE-POSITIVE RATE: %d/%d evergreen facts wrongly suppressed. "+
-		"Branch 3 conflates 'unreferenced for a day' with 'fabrication risk'.",
+	t.Logf("BRANCH-3 FALSE-POSITIVE RATE (post-fix): %d/%d evergreen facts wrongly suppressed. "+
+		"Volatility gate eliminates all FPs: TypeFact is immutable, not subject to age-based abstention.",
 		falsePositives, len(corpus))
 }
 
