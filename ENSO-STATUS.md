@@ -104,7 +104,9 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Open gap:** Verify mdstore format includes reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`). If not, add them — this is WP-1 work.
 
-**Next open WP: WP-1** — format reconciliation + documentation hygiene. Requires Matt's call on the `provenance` field decision before building.
+**Current WP: WP-1** — format reconciliation + documentation hygiene.
+
+**`provenance` call signed (Matt, 2026-07-10):** remove it. No production consumer exists; synthetic/real separation is already enforced at the bench level (separate RealCases vs. SyntheticExpectations buckets). YAGNI. Remove from golden file, marshal tests, and any doc references.
 
 ---
 

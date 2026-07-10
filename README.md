@@ -98,10 +98,9 @@ Layout:
 
 | Path | Ring | Status |
 | --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Correct`/`CommitCorrection`), correction sensor (`DetectCorrection`), recall math (`StrengthAt`/`Rank`, decay fields written-but-inert until Phase 3), `Store` port | Stage 1 ✅ |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`/`Rank`, decay fields written-but-inert until Phase 3), `Store` port | Stage 1 ✅ |
 | `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore` | Stage 2 ✅ |
 | `internal/memstore/` | In-memory `Store` — test/speed double for the core and bench | ✅ |
-| `internal/confirm/` | Correction assembly — `TargetResolver`/`StoreResolver` + the pure `Proposal` value + `Propose()` (detect → resolve → Proposal; writes nothing) | ✅ (lean — see note) |
 | `internal/bench/` | Offline replay benchmark — the success metric (recall model vs. naive baseline) + the detector replay + the end-to-end capture proof | ✅ |
 | `cmd/enso/` (planned) | CLI / runnable driving adapter | Stage 4 — not started |
 

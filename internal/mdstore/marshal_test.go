@@ -78,7 +78,6 @@ func TestRoundTrip_Edge(t *testing.T) {
 func TestRoundTrip_NullsAndExtra(t *testing.T) {
 	in := sampleEntry(t)
 	in.EventTime = nil // explicit null
-	in.Extra["provenance"] = "backfill-2026-06-20"
 	in.Extra["source_file"] = "memory/2026-06-01.md"
 
 	doc := MarshalEntry(in)
@@ -87,8 +86,8 @@ func TestRoundTrip_NullsAndExtra(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	assertEntryEqual(t, in, entries[0])
-	if entries[0].Extra["provenance"] != "backfill-2026-06-20" {
-		t.Errorf("Extra provenance lost: %v", entries[0].Extra)
+	if entries[0].Extra["source_file"] != "memory/2026-06-01.md" {
+		t.Errorf("Extra source_file lost: %v", entries[0].Extra)
 	}
 }
 
@@ -174,7 +173,6 @@ func assertTimePtrEqual(t *testing.T, name string, want, got *time.Time) {
 // deliberately, not reflexively.
 func TestGolden(t *testing.T) {
 	e := sampleEntry(t)
-	e.Extra["provenance"] = "live"
 	ed := core.Edge{From: "mem:2026-06-21-x", Type: core.EdgeSupersedes, To: string(e.ID), Extra: map[string]string{}}
 	got := Marshal([]core.Entry{e}, []core.Edge{ed})
 

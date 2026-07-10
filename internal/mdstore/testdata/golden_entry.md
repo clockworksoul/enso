@@ -13,7 +13,6 @@
 - S_floor: 0.2
 - lambda: 0.02
 - S_cap: 1
-- provenance: live
 
 ### edge
 - from: mem:2026-06-21-x
