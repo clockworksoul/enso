@@ -48,17 +48,16 @@ type Case struct {
 	WantID core.ID   // the ground-truth correct entry's ID
 
 	// Utterance is the verbatim (faithfully reconstructed) correction sentence
-	// that, in the real conversation, would have triggered capture of the
-	// SUPERSEDES edge this case relies on. It is OPTIONAL and exists ONLY for the
-	// detector replay (TestDetector_*): it measures whether core.DetectCorrection
-	// would actually fire on the real language and resolve the stale target.
+	// that, in the real conversation, accompanied the supersession this case
+	// relies on. It is OPTIONAL and exists for human-readability and future
+	// capture-layer work (WP-5): it documents the real correction language so
+	// the capture half can eventually be tested against it.
 	//
 	// Empty Utterance is meaningful, not missing: NEIGHBOR-class misses had NO
 	// correction utterance at all (the failure was confabulation, not a stale
-	// belief someone corrected), so there is nothing for a detector to detect.
-	// The detector replay skips empty-Utterance cases and reports them as
-	// "no utterance" rather than as detector misses — that distinction is itself
-	// a finding about which misses a correction-detector can and cannot address.
+	// belief someone corrected) — there is nothing for a future capture layer to
+	// detect. An empty Utterance is a structural property of the miss class, not
+	// a gap in the fixture.
 	Utterance string
 
 	// Candidates are all entries that plausibly match the query and exist as of

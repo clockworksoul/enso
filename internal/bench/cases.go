@@ -72,7 +72,7 @@ func mustEntry(idLabel string, nt core.NodeType, content string, encodedAt time.
 //
 // What was asked: "what's next on the TODO" → I surfaced "Message Adam re:
 // headcount, overdue since Jun 16."
-// What was true: the headcount ask already landed at the Jun 18 Adam 1:1.
+// What was true: the headcount ask already landed at the Jun 18 1:1.
 // Why STALE: the Jun 16 TODO line was correct-as-of-old-state and never
 // superseded by the Jun 18 outcome.
 //
@@ -85,12 +85,11 @@ func mustEntry(idLabel string, nt core.NodeType, content string, encodedAt time.
 // (closing the Jun-16 task when the Jun-18 outcome landed) rescues it. We model
 // the stale item's re-surfacing by giving it an EncodedTime of the last scan.
 //
-// LOOP-CLOSING NOTE: this case is built by exercising the REAL capture path
-// (core.Entry.Correct), not by hand-assembling the SUPERSEDES edge. That makes
-// the benchmark an end-to-end proof: the same function that captures a live
-// correction produces the triple the Ensō model then scores. If capture and
-// consumption ever drift, this case breaks. Hand-wiring would have let them
-// drift silently.
+// NOTE: the detection/correction layer was removed in ADR-001 (cd8e1a2).
+// The supersession triple is built directly: NewEntry for the current fact,
+// Supersede for the closed stale entry + edge. The benchmark measures the
+// consumption side only — given a pre-built triple, Ensō ranks the current
+// entry first where the baseline is fooled by the re-scanned stale.
 func adamHeadcountStale() Case {
 	jun16 := time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)
 	jun18 := time.Date(2026, 6, 18, 15, 0, 0, 0, time.UTC)
@@ -107,23 +106,23 @@ func adamHeadcountStale() Case {
 		[]string{"person:adam", "project:axon"},
 	)
 
-	// Capture the correction THROUGH THE REAL PATH when the Jun-18 outcome landed.
-	stale, current, edge, err := original.Correct(core.Correction{
-		Kind:       core.CorrectRestate,
-		Content:    "Adam headcount ask landed at the Jun 18 1:1. Adam aligned; prefers moving someone internally; no specific person yet.",
-		NewLabel:   "adam headcount landed",
-		AsOf:       jun18,
-		Type:       core.TypeDecision,
-		Confidence: core.ConfHigh,
-	})
-	if err != nil {
-		panic(err)
-	}
+	// Build the supersession triple directly: the corrected entry, then
+	// Supersede to close the original and produce the edge.
+	current := mustEntry(
+		"adam headcount landed",
+		core.TypeDecision,
+		"Adam headcount ask landed at the Jun 18 1:1. Adam aligned; prefers moving someone internally; no specific person yet.",
+		jun18,
+		nil,
+		[]string{"work", "career", "team"},
+		[]string{"person:adam", "project:axon"},
+	)
+	stale, edge := original.Supersede(current.ID, jun18)
 
 	// Reproduce the live failure dynamic: the closed TODO line keeps getting
 	// re-scanned, so by touch-recency it looks fresher than the Jun-18 outcome
-	// right up to the query. Correct leaves content/EncodedTime untouched (INV-2);
-	// we only bump the recency signal the baseline keys on.
+	// right up to the query. Supersede leaves content/EncodedTime untouched
+	// (INV-2); we only bump the recency signal the baseline keys on.
 	jun23scan := time.Date(2026, 6, 23, 20, 0, 0, 0, time.UTC)
 	stale.EncodedTime = jun23scan
 	stale.Temporal.LastRefTime = jun23scan
@@ -154,8 +153,8 @@ func adamHeadcountStale() Case {
 // This is a CorrectReframe: the underlying facts did not change (Matt asked
 // May 26; Ed went silent). The *interpretation* of whose-court was wrong.
 // That is the defining characteristic of the reframe class: same facts,
-// corrected frame. The hazard is exactly what the CorrectionKind docs warn:
-// nothing looked obviously outdated, so recency is maximally misleading.
+// corrected frame. The hazard: nothing looked obviously outdated, so recency
+// is maximally misleading — only supersession surfaces the truth.
 //
 // The stale belief was re-affirmed up to draft-time (looks freshest); the
 // corrected fact (true since May 26) is OLDER by write-time. Only
@@ -179,20 +178,29 @@ func edSandovalTimelineStale() Case {
 
 	// The corrected fact has been TRUE since May 26 (Ed owes the guest-post
 	// terms, and went silent). EventTime = May 26 (when it became true in the
-	// world); AsOf = Jun 23 (when the reframe was captured). The EventTime
-	// distinction is the reason CorrectReframe exists: the corrected fact is
-	// older by world-time than the stale belief, even though it is captured now.
+	// world); EncodedTime = Jun 23 (when the reframe was captured). The
+	// EventTime distinction documents that the corrected fact is older by
+	// world-time than the stale belief, even though it is captured now.
+	// mustEntry does not accept EventTime, so we call NewEntry directly.
 	may26 := time.Date(2026, 5, 26, 14, 0, 0, 0, time.UTC)
-	stale, current, edge, err := original.Correct(core.Correction{
-		Kind:      core.CorrectReframe,
-		Content:   "Neo4j blog: open dependency is on ED's side. Matt asked May 26 for Neo4j guest-post submission terms; Ed punted to DevRel and went silent ~4 weeks. Ball in Ed's court, not Matt's.",
-		NewLabel:  "ed thread ed owes terms",
-		AsOf:      jun23,
-		EventTime: &may26, // the corrected fact became true May 26, not Jun 23
-	})
-	if err != nil {
-		panic(err)
+	correctedID, idErr := core.NewID(jun23, "ed thread ed owes terms")
+	if idErr != nil {
+		panic(idErr)
 	}
+	current, entErr := core.NewEntry(core.NewEntryParams{
+		ID:          correctedID,
+		Type:        core.TypeFact,
+		Content:     "Neo4j blog: open dependency is on ED's side. Matt asked May 26 for Neo4j guest-post submission terms; Ed punted to DevRel and went silent ~4 weeks. Ball in Ed's court, not Matt's.",
+		EncodedTime: jun23,
+		EventTime:   &may26,
+		Confidence:  core.ConfHigh,
+		Tags:        []string{"work", "omega", "career"},
+		About:       []string{"person:ed-sandoval", "project:neo4j-blog"},
+	})
+	if entErr != nil {
+		panic(entErr)
+	}
+	stale, edge := original.Supersede(current.ID, jun23)
 
 	return Case{
 		Name:      "ed-sandoval-timeline-reframe",

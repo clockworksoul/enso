@@ -190,7 +190,8 @@ func (m mutantIgnoreSpecificity) RankQuery(_ string, candidates []core.Entry, ed
 // TestMutation_StaleMechanismsAreCaught replays the STALE seed corpus through
 // the STALE-relevant mutants. The HEADLINE FINDING of this probe (2026-07-04):
 // the two STALE mechanisms — the SUPERSEDES edge and the ValidUntil close — are
-// FULLY REDUNDANT on the seed corpus, because core.Entry.Correct sets BOTH.
+// FULLY REDUNDANT on the seed corpus, because Entry.Supersede sets BOTH
+// ValidUntil and the SUPERSEDES edge in a single call.
 // Removing either one ALONE leaves the other to carry the win, so the corpus
 // (as it stands) cannot detect a break in a SINGLE mechanism.
 //
@@ -210,7 +211,7 @@ func TestMutation_StaleMechanismsAreCaught(t *testing.T) {
 	}
 
 	// (A) The SINGLE-mechanism mutants are EXPECTED to survive on this corpus,
-	//     because the two mechanisms are redundant (Correct sets both). We assert
+	//     because the two mechanisms are redundant (Supersede sets both). We assert
 	//     survival to PIN the redundancy — if a future case makes one mechanism
 	//     independently necessary, this expectation flips and we learn the corpus
 	//     got stronger.
@@ -317,7 +318,7 @@ func TestMutation_PerCaseDiscrimination(t *testing.T) {
 // two "single-mechanism-removed" mutants and records whether each still solves
 // the corpus. This is a diagnostic, not a pass/fail gate — it documents the
 // redundancy so a future refactor knows which mechanism is truly load-bearing
-// vs. belt-and-suspenders. (Both mechanisms are set by core.Entry.Correct, so
+// vs. belt-and-suspenders. (Both mechanisms are set by Entry.Supersede, so
 // the redundancy is real and intentional, but the corpus's SENSITIVITY to each
 // is worth knowing.)
 func TestMutation_StaleRedundancyFinding(t *testing.T) {

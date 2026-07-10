@@ -1,0 +1,57 @@
+# Ensō CI — turns the local gates into physics.
+#
+# Enforces the dev-spec discipline mechanically (the drift-check philosophy
+# applied to the build): every push/PR must pass the same `make check` the
+# developer runs locally, plus the race detector.
+#
+# Deliberately minimal (RH-4 applies to CI too): no coverage services, no
+# release automation, no matrix builds until a documented need exists.
+#
+# NOTE for WP-3: the KùzuDB Go binding uses cgo. When internal/graphstore
+# lands, this workflow may need `apt-get` deps or a CGO_ENABLED step — add
+# them in the same PR that adds the dependency (ADR/allowlist ceremony),
+# not speculatively before.
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The full local gate: fmt-check + vet + build + test + spec-drift.
+      # If this diverges from what `make check` does locally, fix the
+      # Makefile, not this file — CI runs the Makefile precisely so there
+      # is one definition of "green".
+      - name: make check
+        run: make check
+
+      # Green required at every WP close; running it on every push is cheap
+      # insurance and catches data races the moment they're introduced.
+      - name: make test-race
+        run: make test-race
+
+      # Budget-tripwire visibility (RH-6): not a failure condition — the spec
+      # says overrun is fine and concealment is the failure — so this only
+      # annotates the diff size for the reviewer to compare against the open
+      # WP's LoC budget in docs/enso-development-spec.md.
+      - name: diff-size annotation (informational)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          echo "::notice title=RH-6 budget check::$(git diff --shortstat origin/${{ github.base_ref }}...HEAD -- ':!*_test.go' ':!*/testdata/*' ':!docs/*')"

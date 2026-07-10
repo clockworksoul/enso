@@ -91,13 +91,20 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 
 ---
 
-## Codebase state (as of 2026-07-08)
+## Codebase state (as of 2026-07-10) — WP-0 COMPLETE
 
-After cleanup today:
-- **Deleted:** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness (~half the codebase)
+**WP-0 closed:** `go build ./...` was broken because `internal/bench` referenced deleted symbols (`Entry.Correct`, `core.Correction`, `CorrectRestate`, `CorrectReframe`, `DetectCorrection`, `confirm.Propose`). Fixed by:
+- Rewrote `bench/cases.go` and `bench/held_out_cases.go` to build supersession triples directly via `core.NewEntry` + `Entry.Supersede`. All case semantics and timestamps preserved.
+- Rewrote `bench/held_out_test.go`: deleted `TestHeldOut_DetectorGeneralizes` (dead — detection layer gone); kept `TestHeldOut_RecallGeneralizes` (generalization gate, still passes 2/2).
+- Pruned dead symbol references from comments in `bench/corpus.go`, `bench/mutation_test.go`, `bench/cases.go`.
+- `make check` + `make test-race` green. Ensō 2/2 STALE seed + 2/2 held-out. Capture is load-bearing (0.50 without edges). NEIGHBOR documented 0/1 as expected.
+
+**State of codebase:**
 - **Kept:** entry model + store port + mdstore adapter (P1 infrastructure), decay math + ranking (P3 math), benchmark harness with real cases
-- **TODO (Dross Hour Jul 8):** Refactor `bench/cases.go` + `bench/held_out_cases.go` to not use deleted `Entry.Correct` — build supersession triples directly. Then `go test ./...` green + commit.
-- **Gap to spec:** Verify mdstore format includes reserved P3 fields. If not, add them.
+- **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
+- **Open gap:** Verify mdstore format includes reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`). If not, add them — this is WP-1 work.
+
+**Next open WP: WP-1** — format reconciliation + documentation hygiene. Requires Matt's call on the `provenance` field decision before building.
 
 ---
 
