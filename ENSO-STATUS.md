@@ -1,6 +1,6 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-07-08.*
+*Single source of truth for where we are and what done looks like. Updated 2026-07-11.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
 
 ---
@@ -91,7 +91,7 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 
 ---
 
-## Codebase state (as of 2026-07-10) — WP-0 COMPLETE
+## Codebase state (as of 2026-07-11) — WP-0 + WP-1 COMPLETE
 
 **WP-0 closed:** `go build ./...` was broken because `internal/bench` referenced deleted symbols (`Entry.Correct`, `core.Correction`, `CorrectRestate`, `CorrectReframe`, `DetectCorrection`, `confirm.Propose`). Fixed by:
 - Rewrote `bench/cases.go` and `bench/held_out_cases.go` to build supersession triples directly via `core.NewEntry` + `Entry.Supersede`. All case semantics and timestamps preserved.
@@ -102,11 +102,24 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 **State of codebase:**
 - **Kept:** entry model + store port + mdstore adapter (P1 infrastructure), decay math + ranking (P3 math), benchmark harness with real cases
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
-- **Open gap:** Verify mdstore format includes reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`). If not, add them — this is WP-1 work.
+- **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-1** — format reconciliation + documentation hygiene.
+**Current WP: WP-2** — Phase 1 completion (corpus goes live). WP-1 closed 2026-07-11.
 
 **`provenance` call signed (Matt, 2026-07-10):** remove it. No production consumer exists; synthetic/real separation is already enforced at the bench level (separate RealCases vs. SyntheticExpectations buckets). YAGNI. Remove from golden file, marshal tests, and any doc references.
+
+---
+
+## WP-1 CLOSED — format reconciliation & documentation hygiene (2026-07-11)
+
+**Verdict:** All three WP-1 items complete; DoD green.
+1. **`provenance` field** — removed from `mdstore` marshal/parse + golden file (commit `ec2c3f1`, Matt's Jul-10 call). Verified: zero `provenance` references remain in `internal/` or the tech spec. AMEND-1 restored (field exists in all four surfaces or none — it's in none).
+2. **README repair** — the layout `internal/bench`/`cmd/enso` rows, the `confirm` note, the entire Status section, and Next steps were rewritten to post-`cd8e1a2` / ADR-001 reality. The dead detect→resolve→commit `Propose`/`endtoend_test`/reframe-extractor narrative is gone; replaced by the surviving claim (supersession-aware ranking beats naive recency on real misses) + ADR-001 b′ deferral of the detection layer + WP-ordered Next steps. Verified: zero deleted-symbol references remain in README.
+3. **Drift table** — added `2026-07-07-mnemosyne-prior-art-comparison.md` and `adr/ADR-001-scope-ratification.md` as tracked contract sources in `scripts/enso-spec-drift.sh` (SOURCES array), unified-spec §9 (delegated-depth list), and §10 (pinned sha256 table). `make drift` IN SYNC across all 6 sources.
+
+**DoD:** ✅ field consistency (golden/marshal/spec/round-trip) · ✅ `parse(serialize(e))==e` + unknown-key preservation green · ✅ README has no deleted-symbol refs · ✅ `make drift` green with expanded §10 · ✅ `provenance` call signed & recorded. `make check` + `make test-race` green. LoC (code): ±0 (docs + one shell SOURCES line; within the ±60 budget).
+
+**Next (WP-2, needs Matt at open):** ratify grammar frozen (S-schema) + S-1 inline; harden `mdstore.FSStore` for prose-interleaved entries with loud errors; supersession-append ceremony + single-writer lock; `cmd/enso-append`; format README; ≥10 real entries + ≥1 real supersession triple; then the P1 exit measurement (does structured corpus already beat the P0 flat-file baseline?).
 
 ---
 
