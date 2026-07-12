@@ -121,6 +121,8 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 
 **Next (WP-2, needs Matt at open):** ratify grammar frozen (S-schema) + S-1 inline; harden `mdstore.FSStore` for prose-interleaved entries with loud errors; supersession-append ceremony + single-writer lock; `cmd/enso-append`; format README; ≥10 real entries + ≥1 real supersession triple; then the P1 exit measurement (does structured corpus already beat the P0 flat-file baseline?).
 
+**WP-2 opening brief ready (2026-07-11, Dross Hour):** `docs/2026-07-11-wp2-opening-brief.md` — the ratification packet for the Jul-13 review. Consolidates the three sign-offs (S-schema grammar-freeze verbatim-as-shipped, S-1 inline, S-reserved placeholders-stand) into a ~15-min decision, surfaces the one open question (Q-A: type-enum tolerance rule = loud warning vs hard error), lays out the +600-LoC build order, a real first-supersession-triple candidate (Granola keep→uninstall), and a pre-flight checklist. Zero production code touched (RH-1/RH-4). Read it first at the review.
+
 ---
 
 ## Phase gate rule
