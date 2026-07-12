@@ -104,7 +104,8 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-2** — Phase 1 completion (corpus goes live). WP-1 closed 2026-07-11.
+**Current WP: WP-2 CLOSED** — Phase 1 corpus is live. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12.
+**Next: P1 exit measurement** — does structured corpus + active-memory beat the P0 flat-file baseline?
 
 **`provenance` call signed (Matt, 2026-07-10):** remove it. No production consumer exists; synthetic/real separation is already enforced at the bench level (separate RealCases vs. SyntheticExpectations buckets). YAGNI. Remove from golden file, marshal tests, and any doc references.
 
