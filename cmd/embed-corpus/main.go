@@ -74,7 +74,7 @@ type batchResponse struct {
 
 func main() {
 	corpusPath := flag.String("corpus", "internal/bench/testdata/git_history_cases.jsonl", "input corpus JSONL")
-	outPath    := flag.String("out", "internal/bench/testdata/git_history_embeddings.jsonl", "output embeddings JSONL")
+	outPath := flag.String("out", "internal/bench/testdata/git_history_embeddings.jsonl", "output embeddings JSONL")
 	flag.Parse()
 
 	apiKey := os.Getenv("GEMINI_API_KEY")

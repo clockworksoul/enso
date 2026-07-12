@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/clockworksoul/enso/internal/core"
 )
@@ -102,29 +104,69 @@ func (s *FSStore) Append(ctx context.Context, entries []core.Entry, edges []core
 }
 
 // appendBlocks appends the given blocks to a file, separated by blank lines,
-// creating the file if needed. It guarantees a blank-line separation between
-// any pre-existing content and the new blocks.
+// creating the file if needed. It holds an exclusive advisory lock (flock) for
+// the duration of the write so concurrent appenders do not interleave blocks.
 func appendBlocks(path string, blocks []string) error {
 	if len(blocks) == 0 {
 		return nil
 	}
-	var pre string
-	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
-		pre = "\n\n"
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("mdstore: stat %s: %w", path, err)
-	}
-	payload := pre + strings.Join(blocks, "\n\n") + "\n"
-
 	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("mdstore: open %s: %w", path, err)
 	}
 	defer fh.Close()
+
+	// Exclusive advisory lock: blocks other enso-append processes on the same
+	// file. Released automatically when fh is closed.
+	if err := syscall.Flock(int(fh.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("mdstore: lock %s: %w", path, err)
+	}
+
+	// Stat after locking to get accurate size (another writer may have just
+	// appended while we were waiting for the lock).
+	info, err := fh.Stat()
+	if err != nil {
+		return fmt.Errorf("mdstore: stat %s: %w", path, err)
+	}
+	pre := ""
+	if info.Size() > 0 {
+		pre = "\n\n"
+	}
+	payload := pre + strings.Join(blocks, "\n\n") + "\n"
 	if _, err := fh.WriteString(payload); err != nil {
 		return fmt.Errorf("mdstore: write %s: %w", path, err)
 	}
 	return nil
+}
+
+// Supersede performs the supersession-append ceremony (tech spec §3.3):
+//
+//  1. Stamps ValidUntil=now on a closed copy of old.
+//  2. Appends: new entry + closed old entry + SUPERSEDES edge.
+//
+// The on-disk order (entries then edge, within the daily bucket) is an
+// implementation detail; the parser is order-independent. The important
+// invariant (INV-2) is that the old entry is never edited — a closed copy is
+// appended so the full history is always recoverable.
+//
+// Both old and new must already be validated. new.EncodedTime determines which
+// daily file receives all three blocks (they co-locate so the ceremony reads
+// naturally in one file).
+func (s *FSStore) Supersede(ctx context.Context, old, new core.Entry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	closed := old
+	closed.ValidUntil = &now
+
+	edge := core.Edge{
+		From:  new.ID,
+		Type:  core.EdgeSupersedes,
+		To:    string(old.ID),
+		Extra: map[string]string{},
+	}
+	return s.Append(ctx, []core.Entry{new, closed}, []core.Edge{edge})
 }
 
 // Load reads every daily file under memory/ and parses all structured blocks.

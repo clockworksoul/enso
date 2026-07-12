@@ -54,7 +54,7 @@ var dateRe = regexp.MustCompile(`\s*[\(\[].*?[\)\]]|\s*\p{So}+|\s*\p{Sm}+`)
 
 func main() {
 	repo := flag.String("repo", "", "path to the memory git repo")
-	out  := flag.String("out", "", "output JSONL file path")
+	out := flag.String("out", "", "output JSONL file path")
 	flag.Parse()
 
 	if *repo == "" || *out == "" {

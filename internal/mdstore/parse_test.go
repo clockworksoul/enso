@@ -84,13 +84,41 @@ this line is not a property and not blank
 	}
 }
 
-func TestParse_LoudOnUnknownHeader(t *testing.T) {
-	doc := `### widget:nope
+// TestParse_ProseHeadersSkipped verifies that any `###` heading that is not
+// `mem:<id>` or `edge` is treated as prose and silently ignored, so structured
+// entries can coexist with ordinary daily-note section headings.
+func TestParse_ProseHeadersSkipped(t *testing.T) {
+	doc := `### Morning Notes
+- did some work
+
+### widget:nope
 - foo: bar
+
+### mem:2026-07-12-real-entry
+- type: Fact
+- content: the real entry
+- encoded_time: 2026-07-12T12:00:00Z
+- event_time: null
+- valid_from: null
+- valid_until: null
+- confidence: high
+- tags: []
+- about: []
+- last_ref_time: 2026-07-12T12:00:00Z
+- S_last: 1
+- S_floor: 0.05
+- lambda: 0.05
+- S_cap: 1
 `
-	_, _, err := Parse(doc)
-	if err == nil {
-		t.Fatal("expected loud error for unknown block header")
+	entries, _, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("prose headers should be silently skipped, got error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Content != "the real entry" {
+		t.Errorf("wrong entry parsed: %q", entries[0].Content)
 	}
 }
 

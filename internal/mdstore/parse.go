@@ -107,16 +107,20 @@ func Parse(doc string) (entries []core.Entry, edges []core.Edge, err error) {
 	return entries, edges, nil
 }
 
-// blockHeader returns the header text if the line opens a `###` block.
+// blockHeader returns the header text if the line opens a recognised Ensō
+// structured block (i.e. `### mem:<id>` or `### edge`). Any other `###` heading
+// is a prose section header and is intentionally ignored so that structured
+// entries can coexist inline with ordinary daily-note prose.
 func blockHeader(line string) (string, bool) {
 	const p = "### "
-	if strings.HasPrefix(line, p) {
-		return strings.TrimSpace(line[len(p):]), true
+	if !strings.HasPrefix(line, p) {
+		return "", false
 	}
-	if line == "###" {
-		return "", true
+	h := strings.TrimSpace(line[len(p):])
+	if h == "edge" || strings.HasPrefix(h, "mem:") {
+		return h, true
 	}
-	return "", false
+	return "", false // prose section header — ignore
 }
 
 // kvLine parses a `- key: value` property line.
