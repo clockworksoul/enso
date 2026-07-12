@@ -123,6 +123,8 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 
 **WP-2 opening brief ready (2026-07-11, Dross Hour):** `docs/2026-07-11-wp2-opening-brief.md` — the ratification packet for the Jul-13 review. Consolidates the three sign-offs (S-schema grammar-freeze verbatim-as-shipped, S-1 inline, S-reserved placeholders-stand) into a ~15-min decision, surfaces the one open question (Q-A: type-enum tolerance rule = loud warning vs hard error), lays out the +600-LoC build order, a real first-supersession-triple candidate (Granola keep→uninstall), and a pre-flight checklist. Zero production code touched (RH-1/RH-4). Read it first at the review.
 
+**Q-A resolved into a ~2-min confirm (2026-07-12, Dross Hour):** `docs/2026-07-12-wp2-qa-type-enum-tolerance.md` — grounds Q-A in what the code actually does today. Finding: the current parser **hard-rejects** an unknown `type` (`Entry.Validate` → `ParseError` at `parse.go:236` / `types.go:179`), so the brief's "loud warning" lean is a *loosening*, not the status quo, and "consistent with unknown keys preserved" is a false analogy (unknown *keys* → `Extra` soft; unknown *type values* → hard reject, because `type` is load-bearing for decay/specificity ranking). Revised recommendation: **KEEP the hard error** — under a closed-set, self-authored, single-writer, append-only corpus, loud-on-write is the stronger forward-compat story (enum extension = deliberate 2-line change vs. a typo silently mis-ranking a memory). Also flags the one missing test to add in WP-2 either way (no parser-level unknown-type test exists yet). Zero production code touched.
+
 ---
 
 ## Phase gate rule

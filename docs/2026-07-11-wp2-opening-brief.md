@@ -93,6 +93,15 @@ require an RH-7 migration ceremony."
 ### The one open question inside S-schema (needs a yes/no)
 
 **Q-A: Is the 6-type enum (`Fact|Decision|Insight|Person|Project|Task`) final?**
+
+> **→ RESOLVED into a ~2-min confirm by `docs/2026-07-12-wp2-qa-type-enum-tolerance.md`.**
+> Key correction to the lean below: the current code **hard-rejects** an unknown
+> type (`Validate` → `ParseError`), so "warning" is a *loosening*, not the status
+> quo — and the "consistent with unknown keys" reasoning conflates two different
+> code paths (unknown *keys* → `Extra` soft; unknown *type values* → hard reject,
+> because `type` is load-bearing for decay/ranking). That memo's revised
+> recommendation is **KEEP the hard error**. Read it before deciding Q-A.
+
 The golden file and `core/types.go` use exactly these six. Adding a 7th type
 later is *not* a format-breaking migration (it's an enum extension, parser
 tolerates unknown values as long as we decide the tolerance rule). **Lean:**
