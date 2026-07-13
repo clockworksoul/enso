@@ -32,8 +32,19 @@ type P1ExitCase struct {
 type P1ExitResult struct {
 	Case    P1ExitCase
 	Skipped bool
-	Hit     bool   // correct entry ranked #1
-	TopID   string // ID of whatever actually ranked #1
+	Hit     bool   // correct entry ranked #1 (full Ensō pipeline)
+	TopID   string // ID of whatever actually ranked #1 (full pipeline)
+
+	// SupersessionBlindTopID is what ranks #1 when the SAME specificity ranker
+	// runs WITHOUT the supersession/staleness filter. It isolates what
+	// supersession contributes: when this differs from TopID and the blind
+	// result is the stale entry, the filter is proven load-bearing (a naive
+	// recency/specificity ranker would surface the stale answer).
+	SupersessionBlindTopID string
+	// FilterLoadBearing is true when removing the supersession filter changes
+	// the #1 result — i.e. this case genuinely exercises supersession, not just
+	// vocabulary matching against a same-day entry.
+	FilterLoadBearing bool
 }
 
 // LoadP1ExitCases reads the labeled exit cases from a JSONL file.
@@ -106,8 +117,32 @@ func RunP1Exit(corpusRoot string, cases []P1ExitCase) ([]P1ExitResult, error) {
 			// (case exists for tracking, not scoring).
 			results[i].Hit = true
 		}
+
+		// Supersession-blind contrast: same specificity ranking, but skip the
+		// IsCurrent/superseded filter. This isolates supersession's contribution.
+		blind := rankSpecificitySupersessionBlind(c.Query, entries, now)
+		if len(blind) > 0 {
+			results[i].SupersessionBlindTopID = string(blind[0].ID)
+			results[i].FilterLoadBearing = blind[0].ID != ranked[0].ID
+		}
 	}
 	return results, nil
+}
+
+// rankSpecificitySupersessionBlind ranks candidates by the same specificity-
+// first, decay-tiebroken order as the full pipeline, but WITHOUT dropping
+// superseded or expired entries. It is the honest contrast that answers "would
+// a ranker with no supersession knowledge get this case right?" — if the stale
+// entry outranks its correction here, the supersession filter is what saves the
+// full pipeline.
+func rankSpecificitySupersessionBlind(query string, candidates []core.Entry, now time.Time) []core.Entry {
+	terms := core.Tokenize(query)
+	scored := core.RankBySpecificity(candidates, terms, now)
+	out := make([]core.Entry, len(scored))
+	for i, s := range scored {
+		out[i] = s.Entry
+	}
+	return out
 }
 
 // P1ExitScore returns precision@1 over the active (non-skipped) cases.

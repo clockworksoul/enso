@@ -107,6 +107,8 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 **Current WP: WP-2 CLOSED** — Phase 1 corpus is live. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12.
 **Next: P1 exit measurement** — does structured corpus + active-memory beat the P0 flat-file baseline?
 
+**P1 exit honesty pass (2026-07-13, Dross Hour):** the harness reports P@1=1.00 > 0.63, but a new **supersession-blind contrast** column reveals only **1 of 7 active passes (Granola) actually exercises supersession** — Adam/Ed pass because the correction *out-specifies* the stale entry, so the shipped specificity ranker wins without the filter. Corpus now has 3 real supersession triples (Granola + Adam + Ed, written into `memory/2026-07-13.md`). **Load-bearing conclusion for the WP-3 gate:** the 37% headline gap is vs *recency*; supersession's true marginal lift is over the *specificity* ranker P1 already ships, and shows up only on the specificity-indistinguishable Granola shape. **Before WP-3, re-baseline the 79-case git-history benchmark against `EnsoSpecificityModel` (not `BaselineModel`)** to get that number. Doc: `docs/2026-07-13-p1-exit-supersession-blind-contrast.md`.
+
 **`provenance` call signed (Matt, 2026-07-10):** remove it. No production consumer exists; synthetic/real separation is already enforced at the bench level (separate RealCases vs. SyntheticExpectations buckets). YAGNI. Remove from golden file, marshal tests, and any doc references.
 
 ---
