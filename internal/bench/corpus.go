@@ -211,6 +211,38 @@ func (m EnsoModel) RankQuery(_ string, candidates []core.Entry, edges []core.Edg
 	return m.Rank(candidates, edges, now)
 }
 
+// --- P1-exit gating: isolating supersession's contribution over specificity ---
+//
+// The Jul-13 P1-exit honesty pass established that on the hand-curated exit
+// cases only 1 of 7 (Granola) actually exercises supersession — the rest pass
+// because the correction out-specifies the stale entry, so the shipped
+// specificity ranker wins without the filter. The open question that gates
+// WP-3's cost is whether that holds across the whole 79-case git-history
+// corpus: does specificity ALONE (no supersession filter) already recover the
+// current entry, or is the supersession filter load-bearing at corpus scale?
+//
+// These two models make that measurable. Both consume the query (they are
+// QueryModels), so the git-history test can score them via RunQueryAware.
+
+// SpecificityBlindModel is the specificity-first, decay-tiebroken ranker with
+// NO supersession/staleness filter. It answers: "would a ranker that knows the
+// query but has no supersession knowledge get this case right?" If the stale
+// entry outranks its correction here, the supersession filter is the only thing
+// saving the full pipeline on that case.
+type SpecificityBlindModel struct{}
+
+func (SpecificityBlindModel) Name() string { return "specificity-only (no supersession)" }
+
+func (SpecificityBlindModel) RankQuery(query string, candidates []core.Entry, _ []core.Edge, now time.Time) []core.Entry {
+	terms := core.Tokenize(query)
+	scored := core.RankBySpecificity(candidates, terms, now)
+	out := make([]core.Entry, len(scored))
+	for i, s := range scored {
+		out[i] = s.Entry
+	}
+	return out
+}
+
 // --- Scoring ------------------------------------------------------------------
 
 // Result is the outcome of running one Model over the whole corpus.

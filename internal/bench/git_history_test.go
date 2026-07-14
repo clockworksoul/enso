@@ -97,6 +97,57 @@ func TestGitHistoryCorpus(t *testing.T) {
 	}
 }
 
+// TestGitHistorySupersessionGate answers the WP-3 gating question named in
+// ENSO-STATUS.md: re-baseline the 79-case git-history corpus against the
+// specificity ranker (what P1 already ships), not just recency.
+//
+// It contrasts two QueryModels over the SAME corpus:
+//
+//   - specificity-only (no supersession): the shipped specificity ranker with
+//     the staleness/supersession filter REMOVED. This is the honest "does P1's
+//     ranker already recover the current entry on its own?" measurement.
+//   - enso-specificity+staleness+decay: the full shipped pipeline (filter then
+//     specificity-rank).
+//
+// The gap between them is supersession's marginal contribution at corpus scale.
+// If specificity-only already scores ~1.00, the supersession filter is
+// redundant on real data and WP-3 (graph) has not earned its cost. If it scores
+// well below the full pipeline, supersession is load-bearing across the whole
+// corpus, not just the single Granola exit case.
+func TestGitHistorySupersessionGate(t *testing.T) {
+	if _, err := os.Stat(corpusPath); os.IsNotExist(err) {
+		t.Skipf("corpus not found at %s — run cmd/corpus-builder first", corpusPath)
+	}
+	records, err := LoadGitHistoryRecords(corpusPath)
+	if err != nil {
+		t.Fatalf("load records: %v", err)
+	}
+	cases, err := GitHistoryCases(records)
+	if err != nil {
+		t.Fatalf("build cases: %v", err)
+	}
+
+	specOnly := RunQueryAware(SpecificityBlindModel{}, cases)
+	full := RunQueryAware(EnsoSpecificityModel{}, cases)
+
+	t.Logf("\nWP-3 gating measurement (n=%d real supersession pairs):", len(cases))
+	t.Logf("%-40s  %5s  %5s", "Model", "P@1", "Score")
+	t.Logf("%-40s  %5s  %5s", strings.Repeat("-", 40), "-----", "-----")
+	t.Logf("%-40s  %d/%d  %.2f", specOnly.Model, specOnly.TopHits, specOnly.Total, specOnly.Score())
+	t.Logf("%-40s  %d/%d  %.2f", full.Model, full.TopHits, full.Total, full.Score())
+
+	marginal := full.Score() - specOnly.Score()
+	t.Logf("\nsupersession marginal lift over specificity-only: %+.2f (%d cases)",
+		marginal, full.TopHits-specOnly.TopHits)
+
+	// The full pipeline must never underperform specificity-only: the
+	// supersession filter can only DROP the stale distractor, never promote it.
+	if full.Score() < specOnly.Score() {
+		t.Errorf("full pipeline (%.2f) below specificity-only (%.2f) — filter should never hurt",
+			full.Score(), specOnly.Score())
+	}
+}
+
 // TestGitHistoryCorpusSummary prints a compact one-line summary. Useful for
 // quick CI checks where -v is not set.
 func TestGitHistoryCorpusSummary(t *testing.T) {
