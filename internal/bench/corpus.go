@@ -243,6 +243,54 @@ func (SpecificityBlindModel) RankQuery(query string, candidates []core.Entry, _ 
 	return out
 }
 
+// --- WP-3 seam: isolating DECAY's edge-independent contribution ----------------
+//
+// The Jul-14 gate proved the SUPERSEDES edge is load-bearing on 34 of 79 cases
+// (+0.43 over specificity-only). But that measurement's own caveat named the
+// real frontier: the full pipeline scores 1.00 partly BECAUSE the corpus
+// pre-builds the edge + ValidUntil, and creating that edge from an uncorrected
+// in-conversation status change is the hard, capture-deferred problem
+// (ADR-001).
+//
+// So the honest WP-3 design question, unasked until now, is: how much of the
+// 34 same-subject supersession cases can DECAY ALONE recover — with NO
+// SUPERSEDES edge and NO ValidUntil filter, using only the leaky-integrator
+// strength that P3 introduces?
+//
+// This matters because decay is EDGE-INDEPENDENT. StrengthAt reads only
+// LastRefTime (init = EncodedTime); it needs no capture layer, no detection,
+// no human correction — just the write timestamps every entry already has.
+// If decay recovers a meaningful slice of the 34 by simply letting the stale
+// entry age below the fresher one, that slice is staleness suppression the
+// live system gets FOR FREE, without solving capture. It separates two
+// mechanisms the 1.00 headline conflates:
+//
+//   (a) hard supersession FILTER — edge-dependent, capture-deferred
+//   (b) soft strength DECAY      — edge-independent, timestamp-only
+//
+// DecayBlindModel is (b) in isolation: core.Rank (decay strength) over ALL
+// candidates, with the supersession/staleness filter stripped out. It is the
+// query-blind decay analogue of SpecificityBlindModel.
+
+// DecayBlindModel ranks by leaky-integrator decay strength (core.Rank) with NO
+// supersession/staleness filter and no query. It answers: "on a same-subject
+// stale/current pair, does the fresher entry's higher decay strength ALONE put
+// it on top, without any SUPERSEDES edge?" Where it succeeds, staleness
+// suppression is available from timestamps alone; where it fails, only the
+// capture-dependent edge can recover the case.
+type DecayBlindModel struct{}
+
+func (DecayBlindModel) Name() string { return "decay-only (no supersession, no query)" }
+
+func (m DecayBlindModel) Rank(candidates []core.Entry, _ []core.Edge, now time.Time) []core.Entry {
+	ranked := core.Rank(candidates, now)
+	out := make([]core.Entry, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.Entry
+	}
+	return out
+}
+
 // --- Scoring ------------------------------------------------------------------
 
 // Result is the outcome of running one Model over the whole corpus.
