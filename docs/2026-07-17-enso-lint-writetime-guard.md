@@ -106,6 +106,22 @@ go run github.com/clockworksoul/enso/cmd/enso-lint ~/.openclaw/workspace/memory/
   fresh. (An auto-fixer would risk guessing `encoded_time`, which is exactly the
   load-bearing value a human must supply correctly.)
 
+## Dogfood catch (the guard earned its keep on its first run)
+
+Linting *this session's own* daily `mem:` block failed immediately:
+
+```
+memory/2026-07-17.md: mdstore: parse error at line 35: S_last: invalid float "null"
+```
+
+I'd hand-written the reserved P3 floats as `null` (mirroring the time fields).
+But `parseReservedFloat` accepts only a float or **absence** — the canonical
+serializer emits `S_last: 0` (via `%g`), and only the *time* fields (`last_ref_time`)
+take `null`. So the correct hand-authored form is `S_last: 0` / `last_ref_time: null`.
+The guard caught my own mistake seconds after writing it — exactly the failure
+mode (and exactly the timing improvement) it was built for. Fixed to `0`; re-lint
+clean. Worth a note in `FORMAT.md`: reserved floats default to `0`, not `null`.
+
 ## Status
 
 - Implemented via Codex (coding policy).
