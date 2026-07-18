@@ -21,6 +21,9 @@ a structured-Markdown substrate (canonical), a Go core library (reference
 behavior), a KùzuDB graph index with internal vectors (derived), and disposable
 per-framework adapters. This spec covers **work packages WP-0 through WP-4**.
 Phase 3 activation (WP-5) is *defined but locked* — see §9.
+*(Amended 2026-07-18: WP-5's lock was explicitly overridden by Matt and WP-5
+closed; WP-6 — the ADR-001 b′ capture-detection restoration — was added as §11
+with Matt's scope sign-off. Both events are recorded in `ENSO-STATUS.md`.)*
 
 **This spec's one-sentence success condition:** on a real recall case, Ensō
 surfaces the current, connected, correctly-ranked memory where flat-file search
@@ -339,7 +342,60 @@ jobs of any kind; deleting or rewriting corpus history under any justification.
 
 ---
 
-## 11. Reporting cadence
+## 11. WP-6 — Capture detection restoration (ADR-001 b′) — ADDED 2026-07-18
+
+**Added by amendment after WP-0…WP-5 closed; scope selected by Matt 2026-07-18
+(recorded in ENSO-STATUS.md).** This is the RH-9 event: the deleted
+detection/correction layer returns, and it returns exactly the way corollary b′
+prescribed — real misses first, restoration second, and only after WP-4's gate
+closed (it did, 2026-07-18, PASS).
+
+**The evidence basis (n ≥ 1 satisfied four times over):** the four real
+correction utterances preserved verbatim on the real-miss cases —
+`adam-headcount` ("actually the Adam headcount ask already landed…"),
+`ed-sandoval` ("the ball is in Ed's court, not Matt's"), and the two held-out
+misses `granola-ban` ("Granola still works and is the transcript source of
+record") and `leanctx-scope` ("LeanCTX does more than that now, the note
+undersells its current scope") — plus the Jul-1 precision probe (13/18 false
+positives on the first-cut vocabulary, hardened to 0/18 before deletion).
+
+**The work (restore the post-Jul-1 HARDENED versions from git history, adapted
+to the surviving API):**
+1. `core/detect.go` — the lexical sensor (`DetectCorrection`): the
+   precision-hardened signal vocabulary, detect-don't-decide, audit-trail
+   signals. The `Correction`/`Entry.Correct` chokepoint does NOT return; the
+   surviving supersession ceremony (`NewEntry` + `Supersede` / `FSStore
+   .Supersede`) is the only committed path.
+2. `core/contradict.go` — the resolver-side contradiction check
+   (`DetectContradiction`): three-evidence rule (utterance affirms; STORED
+   entry negates; shared subject tokens), for the bare-reaffirmation class the
+   lexical sensor deliberately cannot catch.
+3. `core/propose.go` (new, small) — `ProposeSupersession`: utterance + loaded
+   corpus → a ranked, evidence-named proposal of WHICH current entry is
+   contradicted/corrected. Pure function; never writes. The operator (human or
+   host policy) confirms and executes the ceremony.
+4. Tests restored/adapted: the detection table, the 18-sentence FP probe
+   (locked), contradiction tests, and a NEW end-to-end loop in `bench`: real
+   utterance → proposal → confirm → ceremony → graph recall surfaces the
+   current entry. This closes the Jul-14 caveat ("proves the filter *uses* the
+   edge, not that the live system *creates* it") — capture now creates the edge.
+
+**Explicit non-goals:** `internal/confirm/` (an approval surface is host-side;
+RH-4); auto-commit under any confidence (no reconsolidation — a wrong write is
+permanent); fabrication probes / harvest harness (stay deleted); NEIGHBOR/NOISE
+detection (no utterances exist for them — RH-2); semantic/embedding detection;
+vocabulary broadening beyond the restored hardened set without a new real case.
+
+**LoC budget:** +800 (restoration counts as new lines).
+
+**Definition of done:**
+- [ ] All 4 real utterances detected AND resolved to their documented stale entry by `ProposeSupersession` over their case corpora
+- [ ] The Jul-1 FP probe locked: 0/18 innocent sentences fire, at BOTH the sensor and the proposal level
+- [ ] End-to-end capture loop green: proposal → confirmed ceremony → the WP-3/4 graph recall surfaces the current entry (edge created by capture, not by fixture)
+- [ ] No auto-commit path exists (test-pinned: proposing writes nothing)
+- [ ] `make check` + `make test-race` green; verdict in ENSO-STATUS.md
+
+## 12. Reporting cadence
 
 At each WP close: update `ENSO-STATUS.md` (checkboxes + one-paragraph verdict),
 run `make check` + `make test-race`, re-pin drift hashes if any `docs/` source
