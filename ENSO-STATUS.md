@@ -104,7 +104,39 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-4 OPEN** (2026-07-18). WP-3 closed 2026-07-18 (verdict below). WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+**Current WP: WP-5 OPEN** (2026-07-18, Matt's lock-override). WP-4 closed 2026-07-18 — **GATE PASSED** (verdict below). WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+## WP-4 CLOSED — internal vectors + benchmark gate (2026-07-18) — **GATE VERDICT: PASS**
+
+**Gate numbers (`TestWP4VectorGate`, 79-case git-history real-miss corpus, RH-3 hard gate):**
+
+| Pipeline | P@1 | Mean noise-above | Stale surfaced |
+|---|---|---|---|
+| **Recall v2 (vector → traversal → supersession → rank)** | **79/79 = 1.00** | **0.000** | **0** |
+| Baseline (i) naive recency | 50/79 = 0.63 | 0.367 | — |
+| Baseline (ii) flat lexical search (`memory_search`-equivalent) | 45/79 = 0.57 | 0.430 | — |
+
+Recall v2 beats both baselines on staleness suppression without inflating noise — the
+WP-4 merge condition, met and recorded. **Doorfinder honesty metric:** the correct entry
+is a *seed* on only 29/79 cases lexically; vectors raise that to 37/79 — **8 real
+no-lexical-overlap cases found by the vector door alone** (P@1 parity would have hidden
+that those cases were previously carried by decay coincidence, not by finding the door).
+
+**ADR-002 ratified & written** (`docs/adr/ADR-002-vector-engine.md`, added to the drift
+table + §9/§10, hashes re-pinned): KùzuDB is the single engine — embeddings stored as
+node properties, exact cosine in the adapter; KùzuDB's ANN index (VECTOR extension,
+verified statically linked, no network fetch) deferred per RH-2 until a latency case is
+logged. Embedding source gemini-embedding-001 (`GeminiEmbedder` prod / `MapEmbedder`
+deterministic-local). **Degradation contract test-pinned:** recall-time outage returns
+byte-identical WP-3 lexical+traversal results with `Mode=degraded` + surfaced error
+(`TestVectorOutageDegradesToLexical`); append-time outage stores the record vectorless
+(durability outranks index quality; rebuild re-embeds). Kill-the-graph still green with
+vectors (`TestVectorRebuildDeterministic` — vectors are derived, INV-1).
+
+**DoD:** ✅ ADR-002 written + ratified before implementation · ✅ gate beaten on both
+baselines, numbers recorded · ✅ provider-outage degradation green · ✅ kill-the-graph
+with vectors green · ✅ gate verdict recorded here · ✅ `make check` + `make test-race`
+green. **Budget:** ~220 production LoC vs +500 — in budget. No new dependencies.
 
 ## WP-3 CLOSED — KùzuDB graph store adapter (2026-07-18)
 

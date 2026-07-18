@@ -26,6 +26,15 @@ import (
 // dbPath must be a path this store owns (typically <root>/index.kuzu); an
 // empty dbPath rebuilds into a fresh in-memory graph.
 func OpenRebuilt(ctx context.Context, dbPath string, entries []core.Entry, edges []core.Edge) (*GraphStore, error) {
+	return OpenRebuiltWith(ctx, dbPath, nil, entries, edges)
+}
+
+// OpenRebuiltWith is OpenRebuilt with an embedder attached BEFORE the corpus
+// loads, so every rebuilt record gets its derived vector (WP-4). A nil
+// embedder yields the pure WP-3 lexical+traversal store. Rebuild determinism
+// holds whenever the embedder is deterministic for a given text (the map-
+// backed and provider embedders both are).
+func OpenRebuiltWith(ctx context.Context, dbPath string, emb Embedder, entries []core.Entry, edges []core.Edge) (*GraphStore, error) {
 	if dbPath != "" {
 		if err := os.RemoveAll(dbPath); err != nil {
 			return nil, fmt.Errorf("graphstore: remove stale index %q: %w", dbPath, err)
@@ -38,6 +47,9 @@ func OpenRebuilt(ctx context.Context, dbPath string, entries []core.Entry, edges
 	g, err := Open(dbPath)
 	if err != nil {
 		return nil, err
+	}
+	if emb != nil {
+		g.SetEmbedder(emb)
 	}
 	// Entries first, then edges, so every in-corpus edge endpoint binds to its
 	// real node record rather than an Entity placeholder.

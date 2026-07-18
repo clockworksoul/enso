@@ -27,6 +27,7 @@ declare -a SOURCES=(
   "2026-06-20-enso-hexagonal-portability-architecture.md|0"
   "2026-07-07-mnemosyne-prior-art-comparison.md|0"
   "adr/ADR-001-scope-ratification.md|0"
+  "adr/ADR-002-vector-engine.md|0"
 )
 
 [ -f "$SNAPSHOT" ] || { echo "ERROR: snapshot not found: $SNAPSHOT" >&2; exit 2; }

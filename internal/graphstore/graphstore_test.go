@@ -159,12 +159,12 @@ func TestKillTheGraphDrill(t *testing.T) {
 	recallAll := func(g *GraphStore) [][]core.ID {
 		var out [][]core.ID
 		for _, q := range queries {
-			res, err := g.Recall(ctx, q, now)
+			rr, err := g.Recall(ctx, q, now)
 			if err != nil {
 				t.Fatalf("recall %q: %v", q, err)
 			}
-			ids := make([]core.ID, len(res))
-			for i, r := range res {
+			ids := make([]core.ID, len(rr.Ranked))
+			for i, r := range rr.Ranked {
 				ids[i] = r.Entry.ID
 			}
 			out = append(out, ids)

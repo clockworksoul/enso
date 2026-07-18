@@ -53,15 +53,15 @@ func TestWP3GraphSupersessionGate(t *testing.T) {
 	hits, staleSurfaced := 0, 0
 	for _, c := range cases {
 		g := buildCaseGraph(t, c)
-		res, err := g.Recall(context.Background(), c.Query, c.AsOf)
+		rr, err := g.Recall(context.Background(), c.Query, c.AsOf)
 		g.Close()
 		if err != nil {
 			t.Fatalf("case %s: recall: %v", c.Name, err)
 		}
-		if len(res) > 0 && res[0].Entry.ID == c.WantID {
+		if len(rr.Ranked) > 0 && rr.Ranked[0].Entry.ID == c.WantID {
 			hits++
-		} else if len(res) > 0 {
-			t.Logf("MISS %s: top=%s want=%s", c.Name, res[0].Entry.ID, c.WantID)
+		} else if len(rr.Ranked) > 0 {
+			t.Logf("MISS %s: top=%s want=%s", c.Name, rr.Ranked[0].Entry.ID, c.WantID)
 		} else {
 			t.Logf("MISS %s: no results, want=%s", c.Name, c.WantID)
 		}
@@ -72,7 +72,7 @@ func TestWP3GraphSupersessionGate(t *testing.T) {
 				superseded[core.ID(ed.To)] = true
 			}
 		}
-		for _, r := range res {
+		for _, r := range rr.Ranked {
 			if superseded[r.Entry.ID] {
 				staleSurfaced++
 				t.Errorf("case %s: superseded entry %s surfaced as current", c.Name, r.Entry.ID)
@@ -102,14 +102,14 @@ func TestWP3GraphNeighborTraversal(t *testing.T) {
 		g := buildCaseGraph(t, c)
 		defer g.Close()
 
-		res, err := g.Recall(context.Background(), c.Query, c.AsOf)
+		rr, err := g.Recall(context.Background(), c.Query, c.AsOf)
 		if err != nil {
 			t.Fatalf("case %s: recall: %v", c.Name, err)
 		}
-		if len(res) == 0 || res[0].Entry.ID != c.WantID {
+		if len(rr.Ranked) == 0 || rr.Ranked[0].Entry.ID != c.WantID {
 			got := core.ID("(none)")
-			if len(res) > 0 {
-				got = res[0].Entry.ID
+			if len(rr.Ranked) > 0 {
+				got = rr.Ranked[0].Entry.ID
 			}
 			t.Errorf("case %s: top result %s, want %s", c.Name, got, c.WantID)
 		}

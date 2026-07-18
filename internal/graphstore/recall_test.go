@@ -27,17 +27,17 @@ func TestRecallSupersessionFilter(t *testing.T) {
 	g, _, _ := openWithCorpus(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 
-	res, err := g.Recall(context.Background(), "what happened with granola?", now)
+	rr, err := g.Recall(context.Background(), "what happened with granola?", now)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
-	if len(res) == 0 {
+	if len(rr.Ranked) == 0 {
 		t.Fatalf("no results")
 	}
-	if got := res[0].Entry.ID; got != "mem:2026-07-04-granola-uninstalled" {
+	if got := rr.Ranked[0].Entry.ID; got != "mem:2026-07-04-granola-uninstalled" {
 		t.Fatalf("top result is %s; want the current granola entry", got)
 	}
-	for _, r := range res {
+	for _, r := range rr.Ranked {
 		if r.Entry.ID == "mem:2026-07-03-granola-installed" {
 			t.Fatalf("superseded entry surfaced as current")
 		}
@@ -73,12 +73,12 @@ func TestRecallTraversalReachesChild(t *testing.T) {
 		}
 	}
 
-	res, err := g.Recall(context.Background(), query, now)
+	rr, err := g.Recall(context.Background(), query, now)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
 	childPos, noisePos := -1, -1
-	for i, r := range res {
+	for i, r := range rr.Ranked {
 		switch r.Entry.ID {
 		case childID:
 			childPos = i
@@ -105,7 +105,7 @@ func TestRecallEmptyQueryIsRecentMode(t *testing.T) {
 	g, entries, edges := openWithCorpus(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 
-	res, err := g.Recall(context.Background(), "", now)
+	rr, err := g.Recall(context.Background(), "", now)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -126,13 +126,13 @@ func TestRecallEmptyQueryIsRecentMode(t *testing.T) {
 	}
 	want := core.Rank(kept, now)
 
-	if len(res) != len(want) {
-		t.Fatalf("got %d results, want %d", len(res), len(want))
+	if len(rr.Ranked) != len(want) {
+		t.Fatalf("got %d results, want %d", len(rr.Ranked), len(want))
 	}
 	for i := range want {
-		if res[i].Entry.ID != want[i].Entry.ID {
+		if rr.Ranked[i].Entry.ID != want[i].Entry.ID {
 			t.Fatalf("recent-mode order diverges from core.Rank at %d: got %s, want %s",
-				i, res[i].Entry.ID, want[i].Entry.ID)
+				i, rr.Ranked[i].Entry.ID, want[i].Entry.ID)
 		}
 	}
 }

@@ -42,11 +42,35 @@ var traversalRels = []core.EdgeType{core.EdgeRelatesTo, core.EdgeOwns, core.Edge
 // deeper is query-language cleverness the WP's non-goals prohibit.
 const maxHops = 2
 
-// Recall runs recall v1 and returns ALL current entries ranked best-first,
-// with their specificity and decay-strength scores attached. Like the Phase-1
-// pipeline, recall never hides a current entry — ranking, not omission,
-// expresses relevance (callers take top-k). The graph's contribution is a
-// two-tier order:
+// RecallMode reports which doorfinding path a recall actually used — callers
+// (and the provider-outage test) must be able to tell degradation from health.
+type RecallMode string
+
+const (
+	// ModeLexical: no embedder configured; WP-3 lexical+traversal recall.
+	ModeLexical RecallMode = "lexical"
+	// ModeVector: vector doorfinder active alongside lexical seeding (WP-4).
+	ModeVector RecallMode = "vector"
+	// ModeDegraded: an embedder is configured but failed; recall fell back to
+	// the full WP-3 pipeline (degrade, don't fail — dev spec §8).
+	ModeDegraded RecallMode = "degraded"
+)
+
+// RecallResult is a recall answer plus its provenance.
+type RecallResult struct {
+	Ranked []core.ScoredEntry
+	Mode   RecallMode
+	// Degraded carries the embedder failure when Mode == ModeDegraded. The
+	// failure is surfaced, never swallowed — but it does not make the whole
+	// recall an error, because lexical+traversal results remain valid.
+	Degraded error
+}
+
+// Recall returns ALL current entries ranked best-first, with their
+// specificity and decay-strength scores attached. Like the Phase-1 pipeline,
+// recall never hides a current entry — ranking, not omission, expresses
+// relevance (callers take top-k). The graph's contribution is a two-tier
+// order:
 //
 //	tier 1: entries that match the query lexically (seeds) PLUS entries
 //	        reached from a seed by traversal — ranked specificity-first,
@@ -59,13 +83,23 @@ const maxHops = 2
 // no edges (or a query matching nothing) the tiers collapse to exactly the
 // Phase-1 RankBySpecificity order, so the graph strictly adds reach and never
 // costs parity.
-func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) ([]core.ScoredEntry, error) {
+//
+// Recall v2 (WP-4): when an embedder is configured, the query is embedded and
+// entries whose stored content vectors clear vectorMinSim join the seed set
+// (top vectorSeedK by cosine) BEFORE traversal — the doorfinder finds the
+// nodes, the graph walks from them, the same filter/rank judges. Any embedder
+// failure degrades to exactly the WP-3 result with Mode/Degraded reporting it.
+func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (RecallResult, error) {
 	entries, edges, err := g.Load(ctx)
 	if err != nil {
-		return nil, err
+		return RecallResult{}, err
+	}
+	mode := ModeLexical
+	if g.embedder != nil {
+		mode = ModeVector
 	}
 	if len(entries) == 0 {
-		return nil, nil
+		return RecallResult{Mode: mode}, nil
 	}
 	terms := core.Tokenize(query)
 
@@ -88,16 +122,33 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) ([
 	// rank, identical to core.Rank (the RankBySpecificity degradation
 	// invariant).
 	if len(terms) == 0 {
-		return core.RankBySpecificity(kept, terms, now), nil
+		return RecallResult{Ranked: core.RankBySpecificity(kept, terms, now), Mode: mode}, nil
 	}
 
-	// SEED — current entries that match the query lexically at all.
+	// SEED (lexical) — current entries that match the query lexically at all.
 	var seeds []core.ID
 	seedSet := map[core.ID]bool{}
 	for _, e := range kept {
 		if !seedSet[e.ID] && core.Specificity(e, terms) > 0 {
 			seedSet[e.ID] = true
 			seeds = append(seeds, e.ID)
+		}
+	}
+
+	// SEED (vector, WP-4) — the doorfinder. Failure at any step degrades to
+	// the lexical pipeline and reports itself; it never empties the answer.
+	var degraded error
+	if g.embedder != nil {
+		vecSeeds, err := g.vectorSeeds(ctx, query, kept)
+		if err != nil {
+			mode, degraded = ModeDegraded, err
+		} else {
+			for _, id := range vecSeeds {
+				if !seedSet[id] {
+					seedSet[id] = true
+					seeds = append(seeds, id)
+				}
+			}
 		}
 	}
 
@@ -109,7 +160,7 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) ([
 	if len(seeds) > 0 {
 		reached, err := g.Neighbors(ctx, seeds)
 		if err != nil {
-			return nil, err
+			return RecallResult{}, err
 		}
 		for _, id := range reached {
 			tier1[id] = true
@@ -127,7 +178,61 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) ([
 			t2 = append(t2, e)
 		}
 	}
-	return append(core.RankBySpecificity(t1, terms, now), core.RankBySpecificity(t2, terms, now)...), nil
+	ranked := append(core.RankBySpecificity(t1, terms, now), core.RankBySpecificity(t2, terms, now)...)
+	return RecallResult{Ranked: ranked, Mode: mode, Degraded: degraded}, nil
+}
+
+// vectorSeeds embeds the query and returns the ids of the top-vectorSeedK
+// current entries whose stored content vectors clear vectorMinSim.
+func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.Entry) ([]core.ID, error) {
+	qvec, err := g.embedder.Embed(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return nil, errClosed
+	}
+	stored, err := g.loadEmbeddings()
+	g.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	type scored struct {
+		id  core.ID
+		sim float64
+	}
+	var matches []scored
+	seen := map[core.ID]bool{}
+	for _, e := range kept {
+		if seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+		vec, ok := stored[e.ID]
+		if !ok {
+			continue // record has no vector (embed failed at append; rebuild heals)
+		}
+		if sim := Cosine(qvec, vec); sim >= vectorMinSim {
+			matches = append(matches, scored{id: e.ID, sim: sim})
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].sim != matches[j].sim {
+			return matches[i].sim > matches[j].sim
+		}
+		return matches[i].id < matches[j].id // deterministic tie order
+	})
+	if len(matches) > vectorSeedK {
+		matches = matches[:vectorSeedK]
+	}
+	out := make([]core.ID, len(matches))
+	for i, m := range matches {
+		out[i] = m.id
+	}
+	return out, nil
 }
 
 // Neighbors returns the ids of memory records reachable within maxHops of any

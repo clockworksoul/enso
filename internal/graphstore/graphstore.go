@@ -77,6 +77,10 @@ type GraphStore struct {
 	conn    *kuzu.Connection
 	nextSeq int64
 	closed  bool
+
+	// embedder, when set, embeds entry content at append time (WP-4 vector
+	// doorfinder; see vectors.go). Nil = pure WP-3 lexical+traversal store.
+	embedder Embedder
 }
 
 // errClosed guards every operation after Close: the cgo handles are destroyed,
@@ -143,7 +147,7 @@ func (g *GraphStore) ensureSchema() error {
 		encoded_time STRING, event_time STRING, valid_from STRING, valid_until STRING,
 		confidence STRING, tags STRING, about STRING,
 		last_ref_time STRING, s_last DOUBLE, s_floor DOUBLE, lambda DOUBLE, s_cap DOUBLE,
-		extra STRING`
+		extra STRING, embedding STRING`
 	for _, nt := range memTables {
 		ddl := fmt.Sprintf("CREATE NODE TABLE IF NOT EXISTS %s(%s)", nt, nodeCols)
 		if err := g.exec(ddl); err != nil {
@@ -259,12 +263,25 @@ func (g *GraphStore) insertEntry(e core.Entry) error {
 	if err != nil {
 		return fmt.Errorf("graphstore: entry %q: marshal extra: %w", e.ID, err)
 	}
+	// Derived vector (WP-4). An embed failure stores the record WITHOUT a
+	// vector — durability outranks index quality; the entry is still fully
+	// lexically recallable and a later rebuild re-embeds it. "" = no vector.
+	embedding := ""
+	if g.embedder != nil {
+		if vec, embErr := g.embedder.Embed(context.Background(), e.Content); embErr == nil {
+			b, jerr := json.Marshal(vec)
+			if jerr != nil {
+				return fmt.Errorf("graphstore: entry %q: marshal embedding: %w", e.ID, jerr)
+			}
+			embedding = string(b)
+		}
+	}
 	q := fmt.Sprintf(`CREATE (:%s {seq: $seq, id: $id, content: $content,
 		encoded_time: $encoded_time, event_time: $event_time,
 		valid_from: $valid_from, valid_until: $valid_until,
 		confidence: $confidence, tags: $tags, about: $about,
 		last_ref_time: $last_ref_time, s_last: $s_last, s_floor: $s_floor,
-		lambda: $lambda, s_cap: $s_cap, extra: $extra})`, e.Type)
+		lambda: $lambda, s_cap: $s_cap, extra: $extra, embedding: $embedding})`, e.Type)
 	err = g.execParams(q, map[string]any{
 		"seq":           g.nextSeq,
 		"id":            string(e.ID),
@@ -282,6 +299,7 @@ func (g *GraphStore) insertEntry(e core.Entry) error {
 		"lambda":        e.Temporal.Lambda,
 		"s_cap":         e.Temporal.SCap,
 		"extra":         string(extra),
+		"embedding":     embedding,
 	})
 	if err != nil {
 		return fmt.Errorf("graphstore: insert entry %q: %w", e.ID, err)

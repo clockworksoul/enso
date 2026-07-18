@@ -160,6 +160,7 @@ This snapshot owns invariants/architecture/phases; for depth, go to source. Thes
 | `2026-06-20-enso-hexagonal-portability-architecture.md` | The **portability architecture**. PORT-INV, coupling risk, option-space A/B/C/D, the hexagon mapping, AMEND-1, actionable residue. | §1 PORT-INV, §2 coupling risk, §3 options, §4 hexagon, §5 AMEND-1, §6 residue |
 | `2026-07-07-mnemosyne-prior-art-comparison.md` | The **prior-art comparison** that surfaced the scope-drift question (eval-layer vs. complete replacement) and the anti-sprawl lessons. | full doc |
 | `adr/ADR-001-scope-ratification.md` | The **scope decision**: Ensō is a complete memory replacement (scope b), not a permanent evaluation layer — with corollary b′ (deleted detection layer returns only by real misses, never before WP-4). | full doc |
+| `adr/ADR-002-vector-engine.md` | The **vector engine decision** (WP-4): KùzuDB-native storage with exact cosine (ANN deferred per RH-2), gemini-embedding-001 source, and the degrade-to-lexical outage contract. | full doc |
 
 ---
 
@@ -170,7 +171,7 @@ This snapshot owns invariants/architecture/phases; for depth, go to source. Thes
 - **Drift check:** `bash scripts/enso-spec-drift.sh` recomputes each source's sha256 and compares to this table. Non-matching → snapshot is **STALE**; reconcile §1–§9 against the changed source, then update the hash here.
 - **Discipline:** whenever you edit any source doc, re-run the drift check and update this table in the same commit. Also confirm the edit doesn't conflict *across* sources (e.g., an invariant restated differently in two places) — sources must stay mutually consistent, since this snapshot assumes they are.
 
-Pinned as of 2026-06-20 (compile time); Mnemosyne prior-art doc + ADR-001 added 2026-07-11 (WP-1):
+Pinned as of 2026-06-20 (compile time); Mnemosyne prior-art doc + ADR-001 added 2026-07-11 (WP-1); ADR-002 added 2026-07-18 (WP-4):
 
 | Source doc | sha256 (pinned) |
 | --- | --- |
@@ -180,5 +181,6 @@ Pinned as of 2026-06-20 (compile time); Mnemosyne prior-art doc + ADR-001 added 
 | `2026-06-20-enso-hexagonal-portability-architecture.md` | `7e8112ec32656f5ad366f5358dd2f3754c487c3e251e623a793d479c2dde100d` |
 | `2026-07-07-mnemosyne-prior-art-comparison.md` | `a8b11ea79c891357eaf642cdca32c7a74d1a8652a2716753ff871096553298ac` |
 | `adr/ADR-001-scope-ratification.md` | `a0fe0fdce4d1a5057962275ecc0cdafd23729ace09293c2d4fb78bf31acb711e` |
+| `adr/ADR-002-vector-engine.md` | `372e7085f1078b416f7d60fc8937aa52437d33a4d05b75db4b92dc12a8a5c981` |
 
 > ⚠️ Note: `2026-06-17-phase0-benchmark.md` has a **running log** (§Log) that updates as Phase 0 data accrues. Its hash *will* drift by design. That is expected and benign — the benchmark log is data, not contract. Re-pin its hash on reconcile without treating log-only changes as a spec conflict. Only treat changes to the *other contract sources* (or to the benchmark's contract sections) as snapshot-invalidating.
