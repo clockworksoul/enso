@@ -104,8 +104,32 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-2 CLOSED** — Phase 1 corpus is live. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12.
-**Next: P1 exit measurement** — does structured corpus + active-memory beat the P0 flat-file baseline?
+**Current WP: WP-3 OPEN** (2026-07-18). WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+**Matt's signed calls (2026-07-18, project-completion session):**
+1. **WP-3 "proceed anyway" — SIGNED.** P1 exit passed (P@1 1.00 > 0.63), which per WP-2's
+   final DoD box stops work pending Matt. Matt explicitly green-lit WP-3 and WP-4 through
+   its benchmark gate. (Evidence basis: Jul-14 rebaseline — supersession edge is +0.43
+   load-bearing over specificity on 34 same-subject cases.)
+2. **WP-5 evidence lock OVERRIDDEN — SIGNED.** The spec locks WP-5 behind DM-days of live
+   relevance-drift misses. Matt explicitly chose "everything incl. WP-5": wire the
+   RECALL-DEF bump per spec §9 ordering (spacing-aware bump → floor-modulated spike →
+   update-on-recall), runaway-Hebbian test, ranking-quality measurement. Power-law tail,
+   global normalization, interference/LTD, multi-trace remain out of scope.
+3. **ADR-002 RATIFIED — SIGNED.** Vector engine: KùzuDB-native vector index (no second
+   dependency). Embedding source: gemini-embedding-001 (already the bench baseline;
+   precomputed corpus embeddings live in-repo), degrading to WP-3 lexical+traversal on
+   provider outage — never to zero. Recorded as `docs/adr/ADR-002-vector-engine.md`.
+4. **WP-3 vocabulary-drift box — SIGNED.** The real 2026-06-23 `enso-repo-path` NEIGHBOR
+   miss (real OWNS edge) counts as the n ≥ 1 case for the traversal DoD box, even though
+   its query also matches the target lexically — traversal is what solves the documented
+   miss, which satisfies the box's intent. No manufactured case needed.
+
+**Environment note (2026-07-18):** `TestP1Exit`/`TestP1ExitSummary` now SKIP loudly when
+the live corpus root (`~/.openclaw/workspace` or `ENSO_CORPUS_ROOT`) is absent. Before
+this, an absent corpus scored P@1=0.00 and tripped the regression guard, failing
+`make check` on every machine but Matt's. The measurement runs at full strength wherever
+the corpus exists; the skip names the missing root. Test-only change.
 
 **P1 exit honesty pass (2026-07-13, Dross Hour):** the harness reports P@1=1.00 > 0.63, but a new **supersession-blind contrast** column reveals only **1 of 7 active passes (Granola) actually exercises supersession** — Adam/Ed pass because the correction *out-specifies* the stale entry, so the shipped specificity ranker wins without the filter. Corpus now has 3 real supersession triples (Granola + Adam + Ed, written into `memory/2026-07-13.md`). **Load-bearing conclusion for the WP-3 gate:** the 37% headline gap is vs *recency*; supersession's true marginal lift is over the *specificity* ranker P1 already ships, and shows up only on the specificity-indistinguishable Granola shape. **Before WP-3, re-baseline the 79-case git-history benchmark against `EnsoSpecificityModel` (not `BaselineModel`)** to get that number. Doc: `docs/2026-07-13-p1-exit-supersession-blind-contrast.md`.
 
