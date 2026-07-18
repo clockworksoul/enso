@@ -98,11 +98,14 @@ Layout:
 
 | Path | Ring | Status |
 | --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`/`Rank`, decay fields written-but-inert until Phase 3), `Store` port | Stage 1 ✅ |
-| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore` | Stage 2 ✅ |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`/`Rank`/`RankBySpecificity`), the RECALL-DEF event primitive (`MarkRecalled`, Phase 3), `Store` port | ✅ |
+| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore`, inline daily-file entries, supersession ceremony, advisory locking | ✅ |
+| `internal/graphstore/` | KùzuDB driven-adapter (WP-3/4) — same `Store` port, deterministic rebuild from Markdown, log-first write path, recall = lexical+vector seeds → 1–2-hop traversal → supersession filter → core ranking, degrade-to-lexical on embedding outage (ADR-002) | ✅ |
 | `internal/memstore/` | In-memory `Store` — test/speed double for the core and bench | ✅ |
-| `internal/bench/` | Offline replay benchmark — the success metric (supersession-aware recall model vs. naive recency baseline) over pre-built supersession triples from the real-miss corpus | ✅ |
-| `cmd/enso/` (planned) | CLI / runnable driving adapter | not started (WP-2) |
+| `internal/storetest/` | Shared `Store`-contract conformance suite all three adapters must pass | ✅ |
+| `internal/bench/` | Offline replay benchmark + the hard gates: 79-case real-miss corpus, WP-3 graph gate, WP-4 vector gate, WP-5 activation proofs | ✅ |
+| `cmd/enso-append`, `cmd/enso-lint` | Minimal runnable surfaces: one-shot structured append; write-time corpus validator (same parser as `Load`, cannot drift) | ✅ |
+| `cmd/corpus-builder`, `cmd/embed-corpus`, `cmd/enso-load-check` | Benchmark tooling: git-history corpus builder, Gemini embedding precompute, corpus load smoke-check | ✅ |
 
 > **Detection/correction layer removed (2026-07-08, commit `cd8e1a2`; ratified by ADR-001).** An earlier build grew a recall-*evaluation* layer downstream of the host's search — a correction detector (`core/detect.go`, `core/contradict.go`), a capture chokepoint (`core/correction.go`), a resolver/approval surface (`internal/confirm/`), and fabrication/harvest probes — ~half the codebase. Per ADR-001 (scope b), Ensō is a **complete memory replacement that owns retrieval**, not a permanent eval layer riding on top of an external index, so that layer was deleted and the original-vision skeleton kept (core types, `Store` port, decay math, `mdstore`). The deleted spine lives in git history and returns only by ADR-001 corollary b′ — **real misses first, restoration second, and never before the Phase-2 benchmark gate (WP-4) closes** (see `docs/enso-development-spec.md` RH-9).
 
@@ -110,21 +113,24 @@ The Markdown format is a **public contract** (AMEND-1), pinned by a golden-file 
 
 ## Status
 
-Early construction. **Phase 0** (the `active-memory` trigger) is live and collecting benchmark data in the host environment. The domain core (Stage 1) and the Markdown store (Stage 2) exist and are fully tested. Scope is fixed by **ADR-001**: Ensō is a *complete memory replacement that owns retrieval*, built in gated work packages (`docs/enso-development-spec.md`).
+**All work packages (WP-0 … WP-5) are closed as of 2026-07-18** — see `ENSO-STATUS.md` for the per-WP verdicts and gate numbers. Scope is fixed by **ADR-001**: Ensō is a *complete memory replacement that owns retrieval*, built in gated work packages (`docs/enso-development-spec.md`); the vector engine decision is **ADR-002**.
 
-The surviving value claim is **supersession-aware ranking beats naive recency on real recall misses**: given pre-built supersession triples from the real-miss corpus, the Ensō model surfaces the current entry where a naive recency baseline is still fooled by the stale one (`internal/bench/`). It holds on the `adam-headcount` restate seed plus the held-out generalization cases; broadening the corpus is ongoing. Capture *detection* — recognizing a correction from a raw utterance — was part of the removed layer and is **deferred per ADR-001 b′**: it is restored only against real misses, and never before the Phase-2 benchmark gate closes.
+The value claims are measured, not asserted (79-case real-miss corpus, `internal/bench/`):
 
-No runnable surface yet (`cmd/` is unbuilt by design): the substrate is validated in tests first; a runnable append adapter arrives in WP-2 (Phase-1 go-live). Implementation continues work-package by work-package, in order, gated on explicit go-ahead.
+- **Staleness suppression:** graph recall scores **P@1 = 1.00 with zero stale surfacings** where naive recency scores 0.63 and flat lexical search 0.57 — the SUPERSEDES edge is load-bearing on the 34 same-subject cases specificity provably cannot break (+0.43).
+- **Fail-safe vectors (ADR-002):** the vector doorfinder recovers 8 real no-lexical-overlap cases; an embedding-provider outage degrades recall to byte-identical lexical+traversal results — never to zero.
+- **INV-1 proven:** kill-the-graph drills (with and without vectors, and with Phase-3 bump records) rebuild identical recall from Markdown alone.
+- **Phase-3 texture live:** `core.MarkRecalled` wires the spacing-aware RECALL-DEF bump through the Store port as appended temporal-update records (INV-2); on the recency-vs-relevance case, the bumped pipeline surfaces the durable-and-used memory where every recency proxy fails.
+
+Capture *detection* — recognizing a correction from a raw utterance — remains **deferred per ADR-001 b′**: it returns only against real misses (the gate that kept this codebase honest).
 
 ## Next steps
 
-Work proceeds strictly in work-package order per `docs/enso-development-spec.md` (RH-1: one WP at a time). The discipline (per **complexity kills, simplicity scales**): build the next thing only when a current, documented case demands it (RH-2, n ≥ 1); validate before building; stop at the seam.
+The substrate is complete; the remaining seams are host-side, each gated on real evidence (RH-2, n ≥ 1):
 
-1. **WP-1 — format reconciliation & doc hygiene (current):** every field exists in the golden file, marshal/parse, tech spec, and round-trip tests, or in none; the README and drift table reflect post-`cd8e1a2` reality.
-2. **WP-2 — Phase 1 go-live:** harden `mdstore` for inline entries in `memory/YYYY-MM-DD.md`, add the supersession-append ceremony and single-writer locking, ship a minimal `cmd/enso-append`, write the format README, and begin real structured capture. Exit measurement: does the structured corpus already beat the Phase-0 flat-file baseline? If yes, **stop** and let the graph earn its keep.
-3. **WP-3 — Phase 2 part 1:** a KùzuDB-backed `Store` adapter behind the existing port (core untouched), full deterministic rebuild from Markdown (INV-1 kill-the-graph drill), traversal + supersession recall — no vectors yet.
-4. **WP-4 — Phase 2 part 2:** internal vectors (ADR-002) so an embedding-provider outage degrades recall to lexical+traversal instead of zero, then **run the hard benchmark gate** — beat both baselines on connected-fact retrieval and staleness suppression without inflating noise, or it does not merge.
-5. **WP-5 — Phase 3 (defined but locked):** live decay texture. The decay fields are written-but-inert by deliberate design (no backfill later); WP-5 opens only when DM-days of data show relevance-drift misses supersession alone can't fix.
+1. **Host wiring:** an OpenClaw plugin adapter that serves `memory_recall` from `graphstore` (log-first writes via `LogFirst`, quarantine fallback to flat-file search).
+2. **Material-recall telemetry:** the host emitting RECALL-DEF events into `core.MarkRecalled` — the prerequisite for corpus-scale Phase-3 measurement (the n=1 constructed divergence case is proven; the corpus-scale number needs live events).
+3. **Capture detection (ADR-001 b′):** restore the detection layer only against logged real misses, now that WP-4's gate has closed.
 
 ## License
 
