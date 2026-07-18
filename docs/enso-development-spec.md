@@ -395,7 +395,69 @@ vocabulary broadening beyond the restored hardened set without a new real case.
 - [ ] No auto-commit path exists (test-pinned: proposing writes nothing)
 - [ ] `make check` + `make test-race` green; verdict in ENSO-STATUS.md
 
-## 12. Reporting cadence
+## 12. WP-7 — OpenClaw shadow-mode host adapter — ADDED 2026-07-18
+
+**Added by amendment; scope and both design calls signed by Matt 2026-07-18**
+(recorded in `ENSO-STATUS.md`): the process bridge is a **per-call Go binary**
+(no long-lived sidecar until a real latency case is logged — RH-2), and the
+shadow mechanism is **whichever the host SDK supports cleanly**, chosen after
+reading it (choice recorded below).
+
+**Why:** every measurement so far is offline replay. The project's success
+condition is live: "on a real recall case, Ensō surfaces the current,
+connected, correctly-ranked memory where flat-file search surfaces a stale or
+disconnected one — measured, not asserted." Shadow mode generates that
+evidence without putting Ensō in the critical path: the stock `active-memory`
+plugin keeps the memory slot; Ensō observes the same queries and logs
+divergence.
+
+**Shadow mechanism (chosen from the SDK, 2026-07-18):** OpenClaw plugin hooks
+are per-plugin and observation-only handlers run in parallel across plugins.
+`active-memory` performs recall in its `before_prompt_build` hook; the Ensō
+extension registers its own **observation-only `before_prompt_build` handler**
+on the same event — same conversation context, no modification returned, slot
+untouched — plus an **`after_tool_call` observation** on `memory_search` to
+record what flat-file search returned for the same turn. Divergence is logged;
+the user experience is byte-identical.
+
+**The work:**
+1. **Go side (`clockworksoul/enso`):** `cmd/enso-recall` — a one-shot JSON CLI
+   over the canonical corpus: load via `mdstore` → rebuild in-memory graph →
+   recall v1/v2 (embedder iff `GEMINI_API_KEY` present; degraded mode reported
+   in output). Flags: corpus root, query, top-k, as-of. Output: versioned JSON
+   (results with id/content/scores, mode, degraded). Read-only by
+   construction: the binary NEVER writes to the corpus.
+2. **Host side (`clockworksoul/openclaw` fork):** `extensions/memory-enso` — a
+   TS extension mirroring the stock extensions' layout. NOT `kind: memory` (it
+   never claims the slot in WP-7). Registers the two observation hooks, spawns
+   `enso-recall` per event with a hard timeout, and appends one JSONL record
+   per observed turn to a shadow log under the workspace
+   (`.enso/shadow/YYYY-MM-DD.jsonl`): timestamp, query context hash, Ensō
+   top-k (ids + scores + mode), flat-file result summary, spawn latency.
+   A manual `enso_recall` tool for on-demand side-by-side checks.
+3. **Divergence log format** documented in the extension README (it is the
+   input to the live gate that decides whether Ensō takes the slot — a future
+   WP-8, out of scope here).
+
+**Explicit non-goals:** taking the `memory` slot; auto-capture; RECALL-DEF
+telemetry (needs materially-used detection — the log's `used` field ships
+empty/unknown in WP-7); any prompt or context modification; a long-lived
+daemon; porting any ranking/decay/supersession logic into TypeScript
+(PORT-INV: the extension is a disposable translation layer).
+
+**LoC budgets:** Go +250; TS +500 (excluding tests). Failure containment: a
+crash, timeout, or malformed output from the shadow path is logged and
+swallowed — it must never affect the turn (fail-safe invariant).
+
+**Definition of done:**
+- [ ] `enso-recall` emits stable versioned JSON; read-only pinned by test (corpus byte-identical after any invocation)
+- [ ] Extension registers observation-only hooks; a hook failure/timeout provably does not alter the turn (test-pinned)
+- [ ] Shadow JSONL records both sides (Ensō top-k + flat-file summary) for a replayed conversation turn in the extension's test harness
+- [ ] Latency of the per-call bridge measured and recorded (the RH-2 datum for any future sidecar)
+- [ ] Host-repo checks green for the extension (typecheck + its test suite); `make check` + `make test-race` green in enso
+- [ ] Verdict + shadow-log location recorded in `ENSO-STATUS.md`
+
+## 13. Reporting cadence
 
 At each WP close: update `ENSO-STATUS.md` (checkboxes + one-paragraph verdict),
 run `make check` + `make test-race`, re-pin drift hashes if any `docs/` source
