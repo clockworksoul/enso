@@ -104,7 +104,36 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-7 OPEN (2026-07-18)** — OpenClaw shadow-mode host adapter (dev-spec §12).
+## WP-7 CLOSED — OpenClaw shadow-mode host adapter (2026-07-18)
+
+**Verdict: Ensō observes live traffic without touching it.** Two halves, both green:
+
+- **Go bridge (`cmd/enso-recall`, this repo):** one-shot read-only JSON CLI — corpus load
+  → in-memory graph rebuild → recall v1/v2 (vector doorfinder iff `GEMINI_API_KEY`;
+  degradation in-band, never fatal) → versioned JSON (schema v1). Read-only pinned by
+  test (corpus tree byte-identical after invocations). **Latency datum (RH-2, measured
+  on a live-scale corpus replica: 193 daily files / 35 entries / edges): ~360–430 ms
+  core, ~474 ms wall per call** — comfortably inside the 4 s shadow deadline; **no
+  sidecar is justified.**
+- **Host extension (`extensions/memory-enso`, `clockworksoul/openclaw` branch
+  `claude/memory-enso-shadow`):** observation-only `before_prompt_build` (Ensō's answer
+  for the same turn the slot owner serves; handler never returns a value) +
+  `after_tool_call` on `memory_search`/`memory_recall`/`memory_get` (the flat-file side)
+  + a manual `enso_recall` tool. Divergence JSONL at `<corpusRoot>/.enso/shadow/
+  YYYY-MM-DD.jsonl`, both sides keyed by a shared turn hash, `used:"unknown"` as the
+  RECALL-DEF placeholder so the format survives telemetry's arrival. Fail-safe
+  test-pinned: missing binary/timeout/bad JSON/schema drift → `enso_error` record,
+  nothing thrown, turn untouched. Host checks: 20 vitest tests green, `tsgo:extensions`
+  + `tsgo:extensions:test` clean, oxlint clean.
+
+**DoD:** ✅ stable versioned JSON + read-only pinned · ✅ observation-only hooks with
+contained failure (test-pinned) · ✅ shadow JSONL records both sides in the test harness ·
+✅ per-call latency measured & recorded · ✅ host typecheck+tests+lint green; `make check`
++ `make test-race` green here · ✅ this verdict. **Budgets:** Go ~160 LoC vs +250; TS
+~370 LoC vs +500 — in budget. **Next gate (WP-8, undefined by design):** after DM-days
+of shadow logs, label the divergent turns and decide slot takeover by the standing rule.
+
+**WP-7 was defined at** dev-spec §12.
 **Matt's WP-7 signed calls (2026-07-18):** (1) scope: shadow-mode host adapter is the next
 seam; (2) process bridge: **per-call Go binary** (no sidecar until an RH-2 latency case);
 (3) shadow mechanism: delegated — chosen from the SDK as **observation-only
