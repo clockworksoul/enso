@@ -104,7 +104,15 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**ALL WORK PACKAGES CLOSED (2026-07-18), including the WP-6 amendment.** WP-6 closed 2026-07-18 (verdict below). WP-5 closed 2026-07-18 (Matt's lock-override). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+**Current WP: WP-7 OPEN (2026-07-18)** — OpenClaw shadow-mode host adapter (dev-spec §12).
+**Matt's WP-7 signed calls (2026-07-18):** (1) scope: shadow-mode host adapter is the next
+seam; (2) process bridge: **per-call Go binary** (no sidecar until an RH-2 latency case);
+(3) shadow mechanism: delegated — chosen from the SDK as **observation-only
+`before_prompt_build` + `after_tool_call` hooks** (parallel, non-modifying, slot
+untouched; rationale in dev-spec §12). Host repo: `clockworksoul/openclaw` fork (the
+upstream is cross-owner-blocked for this session), extension in `extensions/memory-enso`.
+
+**ALL PRIOR WORK PACKAGES CLOSED (2026-07-18), including the WP-6 amendment.** WP-6 closed 2026-07-18 (verdict below). WP-5 closed 2026-07-18 (Matt's lock-override). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
 
 ## WP-6 CLOSED — capture detection restored (ADR-001 b′ / RH-9) (2026-07-18)
 
