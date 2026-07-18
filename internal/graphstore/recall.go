@@ -103,6 +103,13 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 	}
 	terms := core.Tokenize(query)
 
+	// RESOLVE — an id may carry several records (supersession re-appends a
+	// closed copy; each material recall appends a temporal update, WP-5). The
+	// LATEST record per id is that id's current state; earlier records are
+	// history, not extra candidates. First-appearance position is kept so
+	// stable-sort tie-breaking stays deterministic.
+	resolved := latestByID(entries)
+
 	// FILTER — same staleness/supersession semantics as the P1 pipeline.
 	superseded := map[core.ID]bool{}
 	for _, ed := range edges {
@@ -110,8 +117,8 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 			superseded[core.ID(ed.To)] = true
 		}
 	}
-	kept := make([]core.Entry, 0, len(entries))
-	for _, e := range entries {
+	kept := make([]core.Entry, 0, len(resolved))
+	for _, e := range resolved {
 		if superseded[e.ID] || !e.IsCurrent(now) {
 			continue
 		}
@@ -180,6 +187,23 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 	}
 	ranked := append(core.RankBySpecificity(t1, terms, now), core.RankBySpecificity(t2, terms, now)...)
 	return RecallResult{Ranked: ranked, Mode: mode, Degraded: degraded}, nil
+}
+
+// latestByID collapses a record stream to one entry per id — the latest
+// record's state at the first record's position (position stability keeps
+// downstream stable sorts deterministic).
+func latestByID(entries []core.Entry) []core.Entry {
+	idx := map[core.ID]int{}
+	var out []core.Entry
+	for _, e := range entries {
+		if i, seen := idx[e.ID]; seen {
+			out[i] = e
+			continue
+		}
+		idx[e.ID] = len(out)
+		out = append(out, e)
+	}
+	return out
 }
 
 // vectorSeeds embeds the query and returns the ids of the top-vectorSeedK

@@ -104,7 +104,43 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-5 OPEN** (2026-07-18, Matt's lock-override). WP-4 closed 2026-07-18 — **GATE PASSED** (verdict below). WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+**ALL WORK PACKAGES CLOSED (2026-07-18).** WP-5 closed 2026-07-18 (Matt's lock-override; verdict below). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+## WP-5 CLOSED — Phase-3 activation: the RECALL-DEF bump wired (2026-07-18)
+
+**Verdict:** the spacing-aware bump is live through the shipped path, per Matt's explicit
+2026-07-18 lock-override. `core.MarkRecalled(ctx, store, id, now)` is the RECALL-DEF
+event primitive: resolve the latest record for the id, apply the already-implemented
+`BumpOnRecall` (α_eff spacing math), and APPEND the temporal-update record via the Store
+port — history never rewritten (INV-2), and this remains the only write a read may
+trigger (RH-5). The graph recall pipeline now resolves latest-record-per-id before
+filter/rank, so appended temporal updates (and supersession closes) govern ranking
+without ever deleting history. The definitional gate — deciding an entry was *materially
+used* — stays host-side by design (tech spec S-3); the substrate ships the primitive.
+
+- **Ranking quality vs P2 baseline (`TestWP5WiredBumpBeatsP2Baseline`):** on the Jul-16
+  recency-vs-relevance scenario replayed END-TO-END (mdstore corpus → 12 weekly
+  `MarkRecalled` events → graph recall), the P2 baseline surfaces the fresh-but-cold
+  entry (recency proxy, wrong); the wired pipeline surfaces the durable-and-used entry
+  (right). Delta attributable to the wiring alone (no-bump control pinned).
+- **Brakes (`TestWP5RunawayBrakes`):** 52 weekly recalls — strength stays ≤ S_cap and
+  S_floor asymptotes below it (ceiling brake); a cold-but-relevant entry still breaks in
+  over the year-long monopolist because specificity is the primary sort key — that IS
+  the shipped novelty brake (no separate bonus knob; none has an n ≥ 1 case, RH-2).
+- **INV-2/INV-1 pinned:** `TestWP5BumpIsAppendOnly` (original + 12 bump records all in
+  the corpus, monotone S_floor/LastRefTime) · `TestWP5KillTheGraphKeepsBumps` (bumps are
+  Markdown-canonical; rebuild preserves ranking).
+- **Deliberately NOT built:** floor-modulated spike height (core comment reserves the
+  slot; no documented brightening-deficit case — RH-2), power-law tail, global
+  normalization, interference/LTD, multi-trace (spec §9 keeps them out of v1).
+  Numeric knobs untouched (RH-8).
+- **Honest caveat (unchanged from Jul-16):** the ranking-quality case is n=1
+  constructed. Corpus-scale measurement requires live material-recall telemetry, which
+  requires a host emitting RECALL-DEF events — the next real seam, out of substrate scope.
+- **DoD (Phase-3 checklist):** ✅ StrengthAt/BumpOnRecall wired into recall ·
+  ✅ spacing-aware bump first · ✅ bump fires only on explicit RECALL-DEF events ·
+  ✅ runaway feedback tested (S_cap + break-in) · ✅ beats the P2 baseline on the
+  ranking-quality case. `make check` + `make test-race` green. ~60 production LoC.
 
 ## WP-4 CLOSED — internal vectors + benchmark gate (2026-07-18) — **GATE VERDICT: PASS**
 
