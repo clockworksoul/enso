@@ -104,7 +104,40 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-3 OPEN** (2026-07-18). WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+**Current WP: WP-4 OPEN** (2026-07-18). WP-3 closed 2026-07-18 (verdict below). WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+## WP-3 CLOSED — KùzuDB graph store adapter (2026-07-18)
+
+**Verdict:** the graph adapter is live behind the unchanged `core.Store` port and meets
+every DoD box on the real corpus. `internal/graphstore` implements the port on embedded
+KùzuDB (pinned `github.com/kuzudb/go-kuzu v0.11.3`, the allowlisted binding): six node
+tables + Entity + four rel tables generated from the core enums (tech spec §6);
+append-only record fidelity via a global `seq` key (supersession re-append copies coexist
+exactly as in Markdown); rebuild is a pure function (`OpenRebuilt`: corpus → graph,
+deterministic + idempotent, test-pinned); write path is log-first (`LogFirst`: Markdown
+first, graph failure = typed `GraphLagError`, never a lost write); recall v1 =
+lexical seeds (shared `core.Tokenize`/`Specificity` — no Cypher re-implementation)
+→ 1–2-hop Cypher traversal over RELATES_TO/OWNS/ABOUT → supersession/staleness filter →
+`core.RankBySpecificity`, in a two-tier order where edge-connected entries outrank
+unconnected noise (the connected-fact fix made observable) and tiers collapse to exact
+P1 ranking when no edges apply (parity by construction).
+
+- **DoD:** ✅ shared `core.Store` conformance suite (`internal/storetest`, new) passes for
+  mdstore + memstore + graphstore · ✅ deterministic rebuild test-pinned · ✅ kill-the-graph
+  drill green (delete db → rebuild from Markdown → recall identical; INV-1 proven) ·
+  ✅ supersession gate on the REAL corpus: `TestWP3GraphSupersessionGate` = **79/79 = 1.00,
+  zero stale surfacings** (parity with the Jul-14 full-pipeline bar; recovers all 34
+  same-subject cases specificity tops out at 0.57 on) · ✅ traversal reaches the real
+  2026-06-23 enso-repo-path NEIGHBOR miss via its real OWNS edge (n ≥ 1 per Matt's signed
+  call), plus a fixture-level proof that a connected child outranks fresher unconnected
+  noise · ✅ `git diff --stat internal/core/` empty · ✅ `make check` + `make test-race` green.
+- **Budget:** 699 non-comment production LoC (960 physical) vs +900 — in budget. Dependency:
+  go-kuzu v0.11.3 (+ transitive uuid/decimal), allowlisted per §3.
+- **Learned the hard way (recorded for WP-4):** (1) KùzuDB rel creation requires
+  single-label endpoints — resolve per-table, never unlabeled; (2) an embedded database
+  per benchmark case must be closed in-loop, not via `t.Cleanup`, or 79 open instances
+  exhaust the process; (3) use-after-Close of the cgo handles segfaults — the store now
+  guards every op with a closed flag and returns a loud Go error instead.
 
 **Matt's signed calls (2026-07-18, project-completion session):**
 1. **WP-3 "proceed anyway" — SIGNED.** P1 exit passed (P@1 1.00 > 0.63), which per WP-2's
