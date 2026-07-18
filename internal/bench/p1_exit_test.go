@@ -3,6 +3,7 @@ package bench
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -11,6 +12,25 @@ const p1ExitCasesPath = "testdata/p1_exit_cases.jsonl"
 
 // p1CorpusRoot is the live memory store root. Override with ENSO_CORPUS_ROOT.
 const p1CorpusRootDefault = "/Users/matt/.openclaw/workspace"
+
+// p1CorpusRoot resolves the live corpus root and SKIPS the test loudly when it
+// is absent. The live corpus lives outside this repo (Matt's workspace); on any
+// other machine an absent corpus is an environment fact, not a recall
+// regression — before this guard, an empty root scored P@1=0.00 and tripped
+// the regression check, failing `make check` everywhere but Matt's machine.
+// When the root exists, the measurement (and its regression guard) runs at
+// full strength; the skip is never taken on a machine that has the corpus.
+func p1CorpusRoot(t *testing.T) string {
+	t.Helper()
+	root := os.Getenv("ENSO_CORPUS_ROOT")
+	if root == "" {
+		root = p1CorpusRootDefault
+	}
+	if _, err := os.Stat(filepath.Join(root, "memory")); err != nil {
+		t.Skipf("live corpus not present at %s (set ENSO_CORPUS_ROOT to run the P1 exit measurement): %v", root, err)
+	}
+	return root
+}
 
 // TestP1Exit is the Phase-1 exit measurement.
 //
@@ -26,10 +46,7 @@ const p1CorpusRootDefault = "/Users/matt/.openclaw/workspace"
 //
 //	go test ./internal/bench/ -run TestP1Exit -v
 func TestP1Exit(t *testing.T) {
-	root := os.Getenv("ENSO_CORPUS_ROOT")
-	if root == "" {
-		root = p1CorpusRootDefault
-	}
+	root := p1CorpusRoot(t)
 
 	cases, err := LoadP1ExitCases(p1ExitCasesPath)
 	if err != nil {
@@ -111,10 +128,7 @@ func TestP1Exit(t *testing.T) {
 
 // TestP1ExitSummary is a compact one-liner for CI / quick checks.
 func TestP1ExitSummary(t *testing.T) {
-	root := os.Getenv("ENSO_CORPUS_ROOT")
-	if root == "" {
-		root = p1CorpusRootDefault
-	}
+	root := p1CorpusRoot(t)
 	cases, err := LoadP1ExitCases(p1ExitCasesPath)
 	if err != nil {
 		t.Fatalf("load: %v", err)

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"time"
 )
@@ -113,4 +115,48 @@ func BumpOnRecall(e Entry, now time.Time, params RecallParams) Entry {
 	// Timestamp the recall.
 	e.Temporal.LastRefTime = now
 	return e
+}
+
+// MarkRecalled is the Phase-3 (WP-5) RECALL-DEF event primitive: it records
+// that entry id was surfaced AND MATERIALLY USED in a reply.
+//
+// The definitional gate is the CALLER's responsibility and it is strict: a
+// search hit, a retrieval, or an entry merely included in context is a
+// non-event (RECALL-DEF, ratified 2026-06-17). Call this only when material
+// use is established — over-calling it re-creates the rich-get-richer feedback
+// the Phase-3 brakes exist to contain. Detecting material use is host-side
+// work (tech spec S-3); the substrate deliberately ships only the primitive.
+//
+// Mechanics (all through the Store port — works identically over Markdown,
+// memory, graph, or the log-first composition):
+//
+//  1. Load the corpus and resolve the LATEST record for id (an id may have
+//     multiple records: supersession closes and prior recalls update).
+//  2. Apply BumpOnRecall with the entry type's default params.
+//  3. APPEND the updated record. History is never rewritten (INV-2): the
+//     prior temporal state remains in the corpus; readers resolve the latest
+//     record per id. This is also the ONLY write a read may ever trigger
+//     (dev spec RH-5).
+//
+// The bumped entry is returned. An unknown id is a loud error.
+func MarkRecalled(ctx context.Context, s Store, id ID, now time.Time) (Entry, error) {
+	entries, _, err := s.Load(ctx)
+	if err != nil {
+		return Entry{}, fmt.Errorf("core: mark recalled %q: %w", id, err)
+	}
+	found := false
+	var latest Entry
+	for _, e := range entries {
+		if e.ID == id {
+			latest, found = e, true // later records supersede earlier temporal state
+		}
+	}
+	if !found {
+		return Entry{}, fmt.Errorf("core: mark recalled %q: no record with that id in the corpus", id)
+	}
+	bumped := BumpOnRecall(latest, now, DefaultRecallParams(latest.Type))
+	if err := s.Append(ctx, []Entry{bumped}, nil); err != nil {
+		return Entry{}, fmt.Errorf("core: mark recalled %q: append temporal update: %w", id, err)
+	}
+	return bumped, nil
 }

@@ -104,8 +104,133 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**Current WP: WP-2 CLOSED** — Phase 1 corpus is live. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12.
-**Next: P1 exit measurement** — does structured corpus + active-memory beat the P0 flat-file baseline?
+**ALL WORK PACKAGES CLOSED (2026-07-18).** WP-5 closed 2026-07-18 (Matt's lock-override; verdict below). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+## WP-5 CLOSED — Phase-3 activation: the RECALL-DEF bump wired (2026-07-18)
+
+**Verdict:** the spacing-aware bump is live through the shipped path, per Matt's explicit
+2026-07-18 lock-override. `core.MarkRecalled(ctx, store, id, now)` is the RECALL-DEF
+event primitive: resolve the latest record for the id, apply the already-implemented
+`BumpOnRecall` (α_eff spacing math), and APPEND the temporal-update record via the Store
+port — history never rewritten (INV-2), and this remains the only write a read may
+trigger (RH-5). The graph recall pipeline now resolves latest-record-per-id before
+filter/rank, so appended temporal updates (and supersession closes) govern ranking
+without ever deleting history. The definitional gate — deciding an entry was *materially
+used* — stays host-side by design (tech spec S-3); the substrate ships the primitive.
+
+- **Ranking quality vs P2 baseline (`TestWP5WiredBumpBeatsP2Baseline`):** on the Jul-16
+  recency-vs-relevance scenario replayed END-TO-END (mdstore corpus → 12 weekly
+  `MarkRecalled` events → graph recall), the P2 baseline surfaces the fresh-but-cold
+  entry (recency proxy, wrong); the wired pipeline surfaces the durable-and-used entry
+  (right). Delta attributable to the wiring alone (no-bump control pinned).
+- **Brakes (`TestWP5RunawayBrakes`):** 52 weekly recalls — strength stays ≤ S_cap and
+  S_floor asymptotes below it (ceiling brake); a cold-but-relevant entry still breaks in
+  over the year-long monopolist because specificity is the primary sort key — that IS
+  the shipped novelty brake (no separate bonus knob; none has an n ≥ 1 case, RH-2).
+- **INV-2/INV-1 pinned:** `TestWP5BumpIsAppendOnly` (original + 12 bump records all in
+  the corpus, monotone S_floor/LastRefTime) · `TestWP5KillTheGraphKeepsBumps` (bumps are
+  Markdown-canonical; rebuild preserves ranking).
+- **Deliberately NOT built:** floor-modulated spike height (core comment reserves the
+  slot; no documented brightening-deficit case — RH-2), power-law tail, global
+  normalization, interference/LTD, multi-trace (spec §9 keeps them out of v1).
+  Numeric knobs untouched (RH-8).
+- **Honest caveat (unchanged from Jul-16):** the ranking-quality case is n=1
+  constructed. Corpus-scale measurement requires live material-recall telemetry, which
+  requires a host emitting RECALL-DEF events — the next real seam, out of substrate scope.
+- **DoD (Phase-3 checklist):** ✅ StrengthAt/BumpOnRecall wired into recall ·
+  ✅ spacing-aware bump first · ✅ bump fires only on explicit RECALL-DEF events ·
+  ✅ runaway feedback tested (S_cap + break-in) · ✅ beats the P2 baseline on the
+  ranking-quality case. `make check` + `make test-race` green. ~60 production LoC.
+
+## WP-4 CLOSED — internal vectors + benchmark gate (2026-07-18) — **GATE VERDICT: PASS**
+
+**Gate numbers (`TestWP4VectorGate`, 79-case git-history real-miss corpus, RH-3 hard gate):**
+
+| Pipeline | P@1 | Mean noise-above | Stale surfaced |
+|---|---|---|---|
+| **Recall v2 (vector → traversal → supersession → rank)** | **79/79 = 1.00** | **0.000** | **0** |
+| Baseline (i) naive recency | 50/79 = 0.63 | 0.367 | — |
+| Baseline (ii) flat lexical search (`memory_search`-equivalent) | 45/79 = 0.57 | 0.430 | — |
+
+Recall v2 beats both baselines on staleness suppression without inflating noise — the
+WP-4 merge condition, met and recorded. **Doorfinder honesty metric:** the correct entry
+is a *seed* on only 29/79 cases lexically; vectors raise that to 37/79 — **8 real
+no-lexical-overlap cases found by the vector door alone** (P@1 parity would have hidden
+that those cases were previously carried by decay coincidence, not by finding the door).
+
+**ADR-002 ratified & written** (`docs/adr/ADR-002-vector-engine.md`, added to the drift
+table + §9/§10, hashes re-pinned): KùzuDB is the single engine — embeddings stored as
+node properties, exact cosine in the adapter; KùzuDB's ANN index (VECTOR extension,
+verified statically linked, no network fetch) deferred per RH-2 until a latency case is
+logged. Embedding source gemini-embedding-001 (`GeminiEmbedder` prod / `MapEmbedder`
+deterministic-local). **Degradation contract test-pinned:** recall-time outage returns
+byte-identical WP-3 lexical+traversal results with `Mode=degraded` + surfaced error
+(`TestVectorOutageDegradesToLexical`); append-time outage stores the record vectorless
+(durability outranks index quality; rebuild re-embeds). Kill-the-graph still green with
+vectors (`TestVectorRebuildDeterministic` — vectors are derived, INV-1).
+
+**DoD:** ✅ ADR-002 written + ratified before implementation · ✅ gate beaten on both
+baselines, numbers recorded · ✅ provider-outage degradation green · ✅ kill-the-graph
+with vectors green · ✅ gate verdict recorded here · ✅ `make check` + `make test-race`
+green. **Budget:** ~220 production LoC vs +500 — in budget. No new dependencies.
+
+## WP-3 CLOSED — KùzuDB graph store adapter (2026-07-18)
+
+**Verdict:** the graph adapter is live behind the unchanged `core.Store` port and meets
+every DoD box on the real corpus. `internal/graphstore` implements the port on embedded
+KùzuDB (pinned `github.com/kuzudb/go-kuzu v0.11.3`, the allowlisted binding): six node
+tables + Entity + four rel tables generated from the core enums (tech spec §6);
+append-only record fidelity via a global `seq` key (supersession re-append copies coexist
+exactly as in Markdown); rebuild is a pure function (`OpenRebuilt`: corpus → graph,
+deterministic + idempotent, test-pinned); write path is log-first (`LogFirst`: Markdown
+first, graph failure = typed `GraphLagError`, never a lost write); recall v1 =
+lexical seeds (shared `core.Tokenize`/`Specificity` — no Cypher re-implementation)
+→ 1–2-hop Cypher traversal over RELATES_TO/OWNS/ABOUT → supersession/staleness filter →
+`core.RankBySpecificity`, in a two-tier order where edge-connected entries outrank
+unconnected noise (the connected-fact fix made observable) and tiers collapse to exact
+P1 ranking when no edges apply (parity by construction).
+
+- **DoD:** ✅ shared `core.Store` conformance suite (`internal/storetest`, new) passes for
+  mdstore + memstore + graphstore · ✅ deterministic rebuild test-pinned · ✅ kill-the-graph
+  drill green (delete db → rebuild from Markdown → recall identical; INV-1 proven) ·
+  ✅ supersession gate on the REAL corpus: `TestWP3GraphSupersessionGate` = **79/79 = 1.00,
+  zero stale surfacings** (parity with the Jul-14 full-pipeline bar; recovers all 34
+  same-subject cases specificity tops out at 0.57 on) · ✅ traversal reaches the real
+  2026-06-23 enso-repo-path NEIGHBOR miss via its real OWNS edge (n ≥ 1 per Matt's signed
+  call), plus a fixture-level proof that a connected child outranks fresher unconnected
+  noise · ✅ `git diff --stat internal/core/` empty · ✅ `make check` + `make test-race` green.
+- **Budget:** 699 non-comment production LoC (960 physical) vs +900 — in budget. Dependency:
+  go-kuzu v0.11.3 (+ transitive uuid/decimal), allowlisted per §3.
+- **Learned the hard way (recorded for WP-4):** (1) KùzuDB rel creation requires
+  single-label endpoints — resolve per-table, never unlabeled; (2) an embedded database
+  per benchmark case must be closed in-loop, not via `t.Cleanup`, or 79 open instances
+  exhaust the process; (3) use-after-Close of the cgo handles segfaults — the store now
+  guards every op with a closed flag and returns a loud Go error instead.
+
+**Matt's signed calls (2026-07-18, project-completion session):**
+1. **WP-3 "proceed anyway" — SIGNED.** P1 exit passed (P@1 1.00 > 0.63), which per WP-2's
+   final DoD box stops work pending Matt. Matt explicitly green-lit WP-3 and WP-4 through
+   its benchmark gate. (Evidence basis: Jul-14 rebaseline — supersession edge is +0.43
+   load-bearing over specificity on 34 same-subject cases.)
+2. **WP-5 evidence lock OVERRIDDEN — SIGNED.** The spec locks WP-5 behind DM-days of live
+   relevance-drift misses. Matt explicitly chose "everything incl. WP-5": wire the
+   RECALL-DEF bump per spec §9 ordering (spacing-aware bump → floor-modulated spike →
+   update-on-recall), runaway-Hebbian test, ranking-quality measurement. Power-law tail,
+   global normalization, interference/LTD, multi-trace remain out of scope.
+3. **ADR-002 RATIFIED — SIGNED.** Vector engine: KùzuDB-native vector index (no second
+   dependency). Embedding source: gemini-embedding-001 (already the bench baseline;
+   precomputed corpus embeddings live in-repo), degrading to WP-3 lexical+traversal on
+   provider outage — never to zero. Recorded as `docs/adr/ADR-002-vector-engine.md`.
+4. **WP-3 vocabulary-drift box — SIGNED.** The real 2026-06-23 `enso-repo-path` NEIGHBOR
+   miss (real OWNS edge) counts as the n ≥ 1 case for the traversal DoD box, even though
+   its query also matches the target lexically — traversal is what solves the documented
+   miss, which satisfies the box's intent. No manufactured case needed.
+
+**Environment note (2026-07-18):** `TestP1Exit`/`TestP1ExitSummary` now SKIP loudly when
+the live corpus root (`~/.openclaw/workspace` or `ENSO_CORPUS_ROOT`) is absent. Before
+this, an absent corpus scored P@1=0.00 and tripped the regression guard, failing
+`make check` on every machine but Matt's. The measurement runs at full strength wherever
+the corpus exists; the skip names the missing root. Test-only change.
 
 **P1 exit honesty pass (2026-07-13, Dross Hour):** the harness reports P@1=1.00 > 0.63, but a new **supersession-blind contrast** column reveals only **1 of 7 active passes (Granola) actually exercises supersession** — Adam/Ed pass because the correction *out-specifies* the stale entry, so the shipped specificity ranker wins without the filter. Corpus now has 3 real supersession triples (Granola + Adam + Ed, written into `memory/2026-07-13.md`). **Load-bearing conclusion for the WP-3 gate:** the 37% headline gap is vs *recency*; supersession's true marginal lift is over the *specificity* ranker P1 already ships, and shows up only on the specificity-indistinguishable Granola shape. **Before WP-3, re-baseline the 79-case git-history benchmark against `EnsoSpecificityModel` (not `BaselineModel`)** to get that number. Doc: `docs/2026-07-13-p1-exit-supersession-blind-contrast.md`.
 
