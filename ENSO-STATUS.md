@@ -115,16 +115,20 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
   on a live-scale corpus replica: 193 daily files / 35 entries / edges): ~360–430 ms
   core, ~474 ms wall per call** — comfortably inside the 4 s shadow deadline; **no
   sidecar is justified.**
-- **Host extension (`extensions/memory-enso`, `clockworksoul/openclaw` branch
-  `claude/memory-enso-shadow`):** observation-only `before_prompt_build` (Ensō's answer
+- **Host extension (`adapters/openclaw-memory-enso`, THIS repo — relocated
+  2026-07-18 after Matt ruled out maintaining an OpenClaw fork; it is an
+  EXTERNAL plugin against the published `openclaw` npm SDK, installed into a
+  stock OpenClaw via `openclaw plugins install --link <dir>`; the fork branch/
+  PR are retired):** observation-only `before_prompt_build` (Ensō's answer
   for the same turn the slot owner serves; handler never returns a value) +
   `after_tool_call` on `memory_search`/`memory_recall`/`memory_get` (the flat-file side)
   + a manual `enso_recall` tool. Divergence JSONL at `<corpusRoot>/.enso/shadow/
   YYYY-MM-DD.jsonl`, both sides keyed by a shared turn hash, `used:"unknown"` as the
   RECALL-DEF placeholder so the format survives telemetry's arrival. Fail-safe
   test-pinned: missing binary/timeout/bad JSON/schema drift → `enso_error` record,
-  nothing thrown, turn untouched. Host checks: 20 vitest tests green, `tsgo:extensions`
-  + `tsgo:extensions:test` clean, oxlint clean.
+  nothing thrown, turn untouched. Checks (standalone, against the published SDK):
+  20 vitest tests green, `tsc --noEmit` clean. (Also passed the monorepo's own
+  tsgo/oxlint/vitest while it briefly lived in the fork.)
 
 **DoD:** ✅ stable versioned JSON + read-only pinned · ✅ observation-only hooks with
 contained failure (test-pinned) · ✅ shadow JSONL records both sides in the test harness ·

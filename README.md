@@ -106,6 +106,8 @@ Layout:
 | `internal/bench/` | Offline replay benchmark + the hard gates: 79-case real-miss corpus, WP-3 graph gate, WP-4 vector gate, WP-5 activation proofs | ✅ |
 | `cmd/enso-append`, `cmd/enso-lint` | Minimal runnable surfaces: one-shot structured append; write-time corpus validator (same parser as `Load`, cannot drift) | ✅ |
 | `cmd/corpus-builder`, `cmd/embed-corpus`, `cmd/enso-load-check` | Benchmark tooling: git-history corpus builder, Gemini embedding precompute, corpus load smoke-check | ✅ |
+| `cmd/enso-recall` | One-shot read-only JSON recall bridge for host adapters (WP-7) | ✅ |
+| `adapters/openclaw-memory-enso/` | External OpenClaw plugin (TS): shadow-mode divergence observer, installs into stock OpenClaw — no fork (WP-7) | ✅ |
 
 > **Detection/correction layer removed (2026-07-08, commit `cd8e1a2`; ratified by ADR-001).** An earlier build grew a recall-*evaluation* layer downstream of the host's search — a correction detector (`core/detect.go`, `core/contradict.go`), a capture chokepoint (`core/correction.go`), a resolver/approval surface (`internal/confirm/`), and fabrication/harvest probes — ~half the codebase. Per ADR-001 (scope b), Ensō is a **complete memory replacement that owns retrieval**, not a permanent eval layer riding on top of an external index, so that layer was deleted and the original-vision skeleton kept (core types, `Store` port, decay math, `mdstore`). The deleted spine lives in git history and returns only by ADR-001 corollary b′ — **real misses first, restoration second, and never before the Phase-2 benchmark gate (WP-4) closes** (see `docs/enso-development-spec.md` RH-9).
 

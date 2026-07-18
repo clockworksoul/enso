@@ -427,8 +427,14 @@ the user experience is byte-identical.
    in output). Flags: corpus root, query, top-k, as-of. Output: versioned JSON
    (results with id/content/scores, mode, degraded). Read-only by
    construction: the binary NEVER writes to the corpus.
-2. **Host side (`clockworksoul/openclaw` fork):** `extensions/memory-enso` — a
-   TS extension mirroring the stock extensions' layout. NOT `kind: memory` (it
+2. **Host side (AMENDED 2026-07-18, same day): `adapters/openclaw-memory-enso`
+   in THIS repo** — an EXTERNAL OpenClaw plugin built against the published
+   `openclaw` npm SDK and installed into a stock OpenClaw via
+   `openclaw plugins install --link <dir>` (no fork; Matt ruled out
+   maintaining one, and OpenClaw's plugin system needs none). Housing the
+   adapter with Ensō is what the hexagon doc prescribed anyway: adapters are
+   Ensō's disposable translation layers. The extension mirrors the stock
+   extensions' layout. NOT `kind: memory` (it
    never claims the slot in WP-7). Registers the two observation hooks, spawns
    `enso-recall` per event with a hard timeout, and appends one JSONL record
    per observed turn to a shadow log under the workspace
@@ -454,7 +460,7 @@ swallowed — it must never affect the turn (fail-safe invariant).
 - [ ] Extension registers observation-only hooks; a hook failure/timeout provably does not alter the turn (test-pinned)
 - [ ] Shadow JSONL records both sides (Ensō top-k + flat-file summary) for a replayed conversation turn in the extension's test harness
 - [ ] Latency of the per-call bridge measured and recorded (the RH-2 datum for any future sidecar)
-- [ ] Host-repo checks green for the extension (typecheck + its test suite); `make check` + `make test-race` green in enso
+- [ ] Adapter checks green against the PUBLISHED openclaw SDK (tsc + vitest, standalone); `make check` + `make test-race` green in enso
 - [ ] Verdict + shadow-log location recorded in `ENSO-STATUS.md`
 
 ## 13. Reporting cadence
