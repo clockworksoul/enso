@@ -104,7 +104,46 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
 
-**ALL WORK PACKAGES CLOSED (2026-07-18).** WP-5 closed 2026-07-18 (Matt's lock-override; verdict below). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+**ALL WORK PACKAGES CLOSED (2026-07-18), including the WP-6 amendment.** WP-6 closed 2026-07-18 (verdict below). WP-5 closed 2026-07-18 (Matt's lock-override). WP-4 closed 2026-07-18 — **GATE PASSED**. WP-3 closed 2026-07-18. WP-1 closed 2026-07-11. WP-2 closed 2026-07-12; P1 exit measured (pass) 2026-07-13/14.
+
+## WP-6 CLOSED — capture detection restored (ADR-001 b′ / RH-9) (2026-07-18)
+
+**Scope signed by Matt 2026-07-18** (seam selection recorded here; WP definition added as
+dev-spec §11). **Verdict: the RH-9 event happened the way corollary b′ prescribed** —
+real misses first (the four verbatim correction utterances preserved on the real-miss
+cases), restoration second, after WP-4's gate closed.
+
+**What returned (the post-Jul-1 PRECISION-HARDENED versions, restored from git history
+at `cd8e1a2^`):** `core/detect.go` (lexical sensor, hardened vocabulary, audit-trail
+signals, detect-don't-decide) and `core/contradict.go` (resolver-side three-evidence
+contradiction check for the bare-reaffirmation class). **What did NOT return:** the
+`Correction`/`Entry.Correct` chokepoint and `internal/confirm/` — the surviving
+supersession ceremony is the only committed path, and an approval surface is host-side
+(RH-4). **What is new:** `core/propose.go` — `ProposeSupersession`, the corpus-level
+composition: contradiction-first targeting (corpus supplies half the evidence), lexical
+specificity targeting otherwise, full evidence trail, pure function, NO auto-commit path.
+
+- **The Jul-14 caveat is retired** (`TestWP6CaptureClosesTheLoop`): all **4/4 real
+  utterances** replayed from the PRE-correction corpus state produce a proposal targeting
+  the documented stale belief (adam → `restate:bare-actually`, ed-sandoval →
+  `reframe:whose-court`, granola → **contradiction path** with `restate:still-affirmative`
+  co-firing, leanctx → `restate:scope-expansion`); operator confirmation executes the
+  ceremony; the WP-3/4 graph recall then surfaces the current entry via an edge that
+  exists ONLY because capture created it.
+- **Precision fence locked on both sides:** the Jul-1 18-sentence innocent corpus is
+  0/18 at the sensor (`TestDetectCorrection_SeamZeroPrecision`, restored) AND
+  non-actionable at the proposal level (`TestProposeSupersession_PrecisionFence`);
+  contradiction must-not-fire set restored (different subject, no stored negation,
+  superseded target, status-word-only overlap).
+- **No-auto-commit pinned twice:** `TestWP6ProposalWritesNothing` (corpus byte-identical
+  after proposing) + `TestProposeSupersession_Pure` (inputs unmutated).
+- **DoD:** ✅ 4/4 real utterances detected + resolved · ✅ FP probe 0/18 at both levels ·
+  ✅ end-to-end capture-created edge green · ✅ no auto-commit path (test-pinned) ·
+  ✅ `make check` + `make test-race` green. **Budget:** 363 production LoC vs +800 — in
+  budget. No new dependencies; core remains stdlib-only.
+- **Still deferred (unchanged):** NEIGHBOR/NOISE detection (no utterances exist — RH-2),
+  semantic detection, any vocabulary broadening without a new real case, the host-side
+  approval surface.
 
 ## WP-5 CLOSED — Phase-3 activation: the RECALL-DEF bump wired (2026-07-18)
 

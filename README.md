@@ -122,15 +122,14 @@ The value claims are measured, not asserted (79-case real-miss corpus, `internal
 - **INV-1 proven:** kill-the-graph drills (with and without vectors, and with Phase-3 bump records) rebuild identical recall from Markdown alone.
 - **Phase-3 texture live:** `core.MarkRecalled` wires the spacing-aware RECALL-DEF bump through the Store port as appended temporal-update records (INV-2); on the recency-vs-relevance case, the bumped pipeline surfaces the durable-and-used memory where every recency proxy fails.
 
-Capture *detection* — recognizing a correction from a raw utterance — remains **deferred per ADR-001 b′**: it returns only against real misses (the gate that kept this codebase honest).
+Capture *detection* — recognizing a correction from a raw utterance — **returned on 2026-07-18 (WP-6), exactly as ADR-001 b′ prescribed**: restored from git history in its precision-hardened form, against the four real correction utterances, only after WP-4's gate closed. `core.ProposeSupersession` turns an utterance plus the loaded corpus into an evidence-named supersession proposal (contradiction-first, then lexical); confirmation and the ceremony remain the operator's — there is no auto-commit path.
 
 ## Next steps
 
 The substrate is complete; the remaining seams are host-side, each gated on real evidence (RH-2, n ≥ 1):
 
-1. **Host wiring:** an OpenClaw plugin adapter that serves `memory_recall` from `graphstore` (log-first writes via `LogFirst`, quarantine fallback to flat-file search).
-2. **Material-recall telemetry:** the host emitting RECALL-DEF events into `core.MarkRecalled` — the prerequisite for corpus-scale Phase-3 measurement (the n=1 constructed divergence case is proven; the corpus-scale number needs live events).
-3. **Capture detection (ADR-001 b′):** restore the detection layer only against logged real misses, now that WP-4's gate has closed.
+1. **Host wiring:** an OpenClaw plugin adapter that serves `memory_recall` from `graphstore` (log-first writes via `LogFirst`, quarantine fallback to flat-file search), surfaces `ProposeSupersession` proposals for confirmation, and emits RECALL-DEF events into `core.MarkRecalled`.
+2. **Material-recall telemetry:** the host-side half of Phase-3 measurement — the n=1 constructed divergence case is proven; the corpus-scale number needs live events.
 
 ## License
 
