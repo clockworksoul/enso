@@ -65,30 +65,54 @@ func main() {
 }
 
 // targets resolves the set of files to lint from either -dir or positional args.
-// Supplying both, or neither, is a usage error.
+// Supplying both is a usage error; supplying neither is too. Any positional arg
+// that is itself a directory is walked like -dir (the natural `enso-lint memory/`
+// invocation just works instead of failing with "is a directory") — this closes
+// the exact usability trap that let the malformed-file class recur.
 func targets(dir string, args []string) ([]string, error) {
 	switch {
 	case dir != "" && len(args) > 0:
 		return nil, fmt.Errorf("use either -dir or file paths, not both")
 	case dir != "":
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			return nil, fmt.Errorf("read dir %s: %w", dir, err)
-		}
+		return dirMarkdown(dir)
+	case len(args) > 0:
 		var out []string
-		for _, de := range ents {
-			if de.IsDir() || !strings.HasSuffix(de.Name(), ".md") {
+		for _, a := range args {
+			info, err := os.Stat(a)
+			if err != nil {
+				return nil, fmt.Errorf("stat %s: %w", a, err)
+			}
+			if info.IsDir() {
+				files, derr := dirMarkdown(a)
+				if derr != nil {
+					return nil, derr
+				}
+				out = append(out, files...)
 				continue
 			}
-			out = append(out, filepath.Join(dir, de.Name()))
+			out = append(out, a)
 		}
-		sort.Strings(out)
 		return out, nil
-	case len(args) > 0:
-		return args, nil
 	default:
 		return nil, fmt.Errorf("no targets: give file paths or -dir <memory-dir>")
 	}
+}
+
+// dirMarkdown returns the sorted *.md files directly under dir (non-recursive).
+func dirMarkdown(dir string) ([]string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read dir %s: %w", dir, err)
+	}
+	var out []string
+	for _, de := range ents {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".md") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, de.Name()))
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // lintFile reads path and runs it through the canonical parser. A file with zero

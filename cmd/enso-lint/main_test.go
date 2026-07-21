@@ -112,10 +112,30 @@ func TestTargets(t *testing.T) {
 		t.Fatalf("unsorted or wrong files: %v", got)
 	}
 
-	// positional args pass through.
-	got, err = targets("", []string{"a.md", "b.md"})
+	// positional file args pass through (must exist now that we os.Stat them).
+	fileA := writeTemp(t, "a.md", proseOnly)
+	fileB := filepath.Join(filepath.Dir(fileA), "b.md")
+	if err := os.WriteFile(fileB, []byte(proseOnly), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = targets("", []string{fileA, fileB})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("positional targets: got %v err %v", got, err)
+	}
+
+	// a positional arg that is a DIRECTORY is walked like -dir (the natural
+	// `enso-lint memory/` invocation) instead of erroring "is a directory".
+	got, err = targets("", []string{dir})
+	if err != nil {
+		t.Fatalf("positional dir: unexpected error %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("positional dir: got %d md files, want 2 (%v)", len(got), got)
+	}
+
+	// a nonexistent positional arg is a clear stat error, not silent success.
+	if _, err := targets("", []string{filepath.Join(dir, "ghost.md")}); err == nil {
+		t.Fatal("expected stat error for nonexistent positional file")
 	}
 
 	// both -dir and args = usage error.
