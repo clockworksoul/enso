@@ -93,7 +93,15 @@ func runToJSON(t *testing.T, root, query string) outputJSON {
 }
 
 // TestRecallJSONShape pins the schema-v1 contract the shadow extension parses.
+//
+// Hermetic: the assertion mode == "lexical" is only meaningful when NO vector
+// doorfinder is configured, so the test clears GEMINI_API_KEY for its own
+// process. Without this, the test's verdict depends on the ambient environment
+// (it passes in a shell with no key exported, but fails under the
+// service/cron environment where GEMINI_API_KEY is present — the embedder then
+// runs against the tiny un-embedded temp corpus and reports vector/degraded).
 func TestRecallJSONShape(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "") // pin the lexical path regardless of ambient env
 	root := seedCorpus(t)
 	o := runToJSON(t, root, "what happened with granola?")
 

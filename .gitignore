@@ -30,3 +30,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# stray compiled binaries (cmd names built at repo root)
+/enso-lint
+/enso-recall
+/enso-append
+/enso-load-check
