@@ -124,12 +124,33 @@ The value claims are measured, not asserted (79-case real-miss corpus, `internal
 
 Capture *detection* — recognizing a correction from a raw utterance — **returned on 2026-07-18 (WP-6), exactly as ADR-001 b′ prescribed**: restored from git history in its precision-hardened form, against the four real correction utterances, only after WP-4's gate closed. `core.ProposeSupersession` turns an utterance plus the loaded corpus into an evidence-named supersession proposal (contradiction-first, then lexical); confirmation and the ceremony remain the operator's — there is no auto-commit path.
 
+## Using Ensō in an OpenClaw deployment
+
+**Honest status: Ensō does not yet serve live recall in any OpenClaw deployment.** The substrate in this repo (core, mdstore, graphstore, decay, capture) is done and tested, but the only host integration that exists today runs in **shadow mode** — it observes and logs, it never answers.
+
+### What exists now (shadow mode)
+
+- **`cmd/enso-recall`** (this repo): a one-shot, read-only CLI. Given a corpus root and a query, it loads the Markdown corpus, rebuilds the in-memory graph, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It never writes to the corpus.
+- **`extensions/memory-enso`**: a TypeScript OpenClaw extension that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on `memory_search`) alongside whatever plugin already owns the `memory` slot. For every turn, it spawns `enso-recall` with a hard timeout, and appends one JSONL record comparing Ensō's answer to the flat-file search's answer to a shadow log (`.enso/shadow/YYYY-MM-DD.jsonl`). It never modifies the turn, never claims the `memory` slot, and fails silently (logged, swallowed) on any error or timeout.
+
+That's the entire integration surface: parallel observation, zero effect on live behavior. It exists to generate the evidence (real divergence cases) that a future slot-takeover decision (WP-8) would need — WP-8 is deliberately left unscoped until that evidence exists.
+
+**Current limitation:** the extension was built inside a `clockworksoul/openclaw` fork (branch `claude/memory-enso-shadow`) during the WP-7 spike, mirroring the layout OpenClaw uses for its own bundled/in-core plugins. That layout convention only applies to plugins shipped inside OpenClaw core — it is **not required** for a normal plugin. Per the OpenClaw plugin SDK, any plugin just needs `package.json` (with an `openclaw` block), an `openclaw.plugin.json` manifest, and an entry point via `definePluginEntry`; it installs like any other package (`openclaw plugins install clawhub:<pkg>`, a git URL, or a local path) with no core-repo fork needed. Repackaging `extensions/memory-enso` as a standalone installable package (rather than fork-only) is an open, low-effort follow-up — tracked here, not yet done.
+
+### If you want to try shadow mode today
+
+1. Build `cmd/enso-recall` from this repo (`go build ./cmd/enso-recall`) and confirm it runs against your own Markdown memory corpus.
+2. Pull `extensions/memory-enso` from the `clockworksoul/openclaw` fork's `claude/memory-enso-shadow` branch (until it's repackaged as a standalone plugin, this means checking out that fork rather than a normal plugin install).
+3. Point it at your `enso-recall` binary and corpus root per the extension's own README.
+4. Watch `.enso/shadow/YYYY-MM-DD.jsonl` accumulate divergence records. Nothing about your live memory recall changes.
+
 ## Next steps
 
 The substrate is complete; the remaining seams are host-side, each gated on real evidence (RH-2, n ≥ 1):
 
-1. **Host wiring:** an OpenClaw plugin adapter that serves `memory_recall` from `graphstore` (log-first writes via `LogFirst`, quarantine fallback to flat-file search), surfaces `ProposeSupersession` proposals for confirmation, and emits RECALL-DEF events into `core.MarkRecalled`.
+1. **Repackage the shadow extension** as a standalone installable plugin (no fork dependency) — see the limitation noted above.
 2. **Material-recall telemetry:** the host-side half of Phase-3 measurement — the n=1 constructed divergence case is proven; the corpus-scale number needs live events.
+3. **WP-8 (undefined by design):** after enough shadow-log days accumulate, label the divergent turns and decide whether Ensō takes the `memory` slot.
 
 ## License
 
