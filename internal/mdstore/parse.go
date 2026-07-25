@@ -2,6 +2,7 @@ package mdstore
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +108,18 @@ func Parse(doc string) (entries []core.Entry, edges []core.Edge, err error) {
 	return entries, edges, nil
 }
 
+// memHeaderRe recognizes headers that are attempting the `mem:<id>` entry-block
+// shape: "mem:" immediately followed by a 4-digit year. This is deliberately
+// looser than the full ID grammar (core.idPattern) — a genuinely malformed id
+// (bad month, stray characters in the slug) must still be treated as an entry
+// attempt and fail loudly at Entry.Validate(), per the parser contract (§3.4).
+// The point of this regex is narrower: distinguish a real id attempt from an
+// ordinary prose heading that merely starts with the literal text "mem:" (e.g.
+// a human-written "### mem: entries" section label used to introduce a group
+// of structured blocks below it, not a data block itself) — that heading has
+// no digits after the colon, so it never looked like an id in the first place.
+var memHeaderRe = regexp.MustCompile(`^mem:\d{4}`)
+
 // blockHeader returns the header text if the line opens a recognised Ensō
 // structured block (i.e. `### mem:<id>` or `### edge`). Any other `###` heading
 // is a prose section header and is intentionally ignored so that structured
@@ -117,7 +130,7 @@ func blockHeader(line string) (string, bool) {
 		return "", false
 	}
 	h := strings.TrimSpace(line[len(p):])
-	if h == "edge" || strings.HasPrefix(h, "mem:") {
+	if h == "edge" || memHeaderRe.MatchString(h) {
 		return h, true
 	}
 	return "", false // prose section header — ignore
@@ -140,6 +153,23 @@ func kvLine(line string) (key, val string, ok bool) {
 		return "", "", false
 	}
 	return key, val, true
+}
+
+// normalizeNodeType tolerates case variation in the `type` field against the
+// closed enum (tech spec §6) — e.g. a hand-typed "fact" normalizes to "Fact" —
+// while leaving genuinely unknown values untouched so Entry.Validate() still
+// rejects them loudly, with the original text in the error. This does not
+// weaken the load-bearing type-enum invariant (2026-07-12 WP-2 Q-A: hard-reject
+// unknown types, since type drives decay/S_floor/lambda math); it only
+// forgives casing, the single most common hand-authoring typo, while a
+// genuinely bogus type (e.g. "banana") still fails exactly as before.
+func normalizeNodeType(raw string) core.NodeType {
+	for known := range core.ValidNodeTypes {
+		if strings.EqualFold(string(known), raw) {
+			return known
+		}
+	}
+	return core.NodeType(raw)
 }
 
 // interpret turns a rawBlock into a typed Entry or Edge.
@@ -171,7 +201,7 @@ func (b *rawBlock) toEntry() (*core.Entry, error) {
 
 	e := core.Entry{
 		ID:      core.ID(b.header),
-		Type:    core.NodeType(b.kv["type"]),
+		Type:    normalizeNodeType(b.kv["type"]),
 		Content: b.kv["content"],
 		Tags:    []string{},
 		About:   []string{},
