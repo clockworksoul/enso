@@ -1,0 +1,53 @@
+{
+  "id": "memory-enso",
+  "name": "Ensō Shadow Memory",
+  "description": "Shadow-mode observer for the Ensō memory system: runs Ensō recall alongside the active memory plugin on every turn and logs divergence. Never modifies prompts, never owns the memory slot (WP-7).",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["enso_recall"]
+  },
+  "uiHints": {
+    "corpusRoot": {
+      "label": "Corpus Root",
+      "placeholder": "~/.openclaw/workspace",
+      "help": "Root of the canonical Ensō Markdown corpus (the directory containing memory/)"
+    },
+    "ensoBinary": {
+      "label": "enso-recall Binary",
+      "placeholder": "enso-recall",
+      "help": "Path to the enso-recall binary (built from github.com/clockworksoul/enso cmd/enso-recall)",
+      "advanced": true
+    },
+    "topK": {
+      "label": "Top K",
+      "help": "Results requested per shadow recall",
+      "advanced": true,
+      "placeholder": "5"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)",
+      "help": "Hard deadline for one enso-recall invocation; on timeout the turn proceeds untouched and the timeout is logged",
+      "advanced": true,
+      "placeholder": "4000"
+    },
+    "shadowLogDir": {
+      "label": "Shadow Log Directory",
+      "help": "Where divergence JSONL files land; defaults to <corpusRoot>/.enso/shadow",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "corpusRoot": { "type": "string" },
+      "ensoBinary": { "type": "string" },
+      "topK": { "type": "integer", "minimum": 1, "maximum": 50 },
+      "timeoutMs": { "type": "integer", "minimum": 250, "maximum": 60000 },
+      "shadowLogDir": { "type": "string" }
+    }
+  }
+}

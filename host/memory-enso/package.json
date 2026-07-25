@@ -1,0 +1,23 @@
+{
+  "name": "@clockworksoul/enso-memory-enso",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shadow-mode observer for the Ensō memory system: logs Ensō recall vs flat-file recall divergence without touching the turn. Standalone home in the Ensō repo (lifted from the clockworksoul/openclaw fork, 2026-07-25) so no OpenClaw monorepo fork needs to be maintained just for this extension.",
+  "type": "module",
+  "main": "./index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openclaw": "2026.7.1-2",
+    "typebox": "1.3.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  }
+}
