@@ -1,0 +1,18 @@
+{
+  "description": "Recall relevant Ensō memories before Codex handles a user prompt.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/scripts/user_prompt_submit.py\"",
+            "commandWindows": "py -3 \"%PLUGIN_ROOT%\\scripts\\user_prompt_submit.py\"",
+            "timeout": 35,
+            "statusMessage": "Checking Ensō memory"
+          }
+        ]
+      }
+    ]
+  }
+}

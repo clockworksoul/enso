@@ -3,8 +3,9 @@
 # fully unit-testable in isolation. Adapters are added in later stages.
 
 GO ?= go
+PYTHON ?= python3
 
-.PHONY: all build test vet fmt fmt-check lint drift check tidy
+.PHONY: all build test test-host-codex vet fmt fmt-check lint drift check tidy
 
 all: check
 
@@ -13,6 +14,9 @@ build:
 
 test:
 	$(GO) test ./...
+
+test-host-codex:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s host/codex/enso-memory/tests -v
 
 # -race + -count=1 for the trustworthy run.
 test-race:
@@ -37,4 +41,4 @@ drift:
 	bash scripts/enso-spec-drift.sh
 
 # The full local gate: format, vet, build, test, and spec-drift.
-check: fmt-check vet build test drift
+check: fmt-check vet build test test-host-codex drift

@@ -427,8 +427,8 @@ the user experience is byte-identical.
    in output). Flags: corpus root, query, top-k, as-of. Output: versioned JSON
    (results with id/content/scores, mode, degraded). Read-only by
    construction: the binary NEVER writes to the corpus.
-2. **Host side (`host/openclaw/` in this repo, as of the 2026-07-25
-   lift-and-shift + 2026-07-27 rename from `host/memory-enso/`):** a
+2. **Host side (`host/openclaw/enso-memory/` in this repo, after the
+   2026-07-25 lift-and-shift and subsequent host/plugin layout normalization):** a
    TS extension (plugin id `memory-enso`) mirroring the stock extensions'
    layout. NOT `kind: memory` (it never claims the slot in WP-7). Registers the two observation hooks, spawns
    `enso-recall` per event with a hard timeout, and appends one JSONL record
@@ -458,7 +458,63 @@ swallowed — it must never affect the turn (fail-safe invariant).
 - [ ] Host-repo checks green for the extension (typecheck + its test suite); `make check` + `make test-race` green in enso
 - [ ] Verdict + shadow-log location recorded in `ENSO-STATUS.md`
 
-## 13. Reporting cadence
+## 13. WP-C0 — Codex protocol adapter — ADDED 2026-07-27
+
+**Opened by Matt's explicit 2026-07-27 request to generate the Codex plugin.**
+Codex is the real second host anticipated by the portability architecture, so
+the standing second-host deferral is satisfied. This WP proves that the same
+canonical corpus and `enso-recall` bridge can drive Codex without changing the
+core or Markdown contract.
+
+**The work:**
+1. Add the Codex host boundary under `host/codex/`, with a validated
+   `enso-memory` Codex plugin package.
+2. Bundle a `UserPromptSubmit` command hook that reads the documented Codex
+   JSON event from stdin, runs the existing `enso-recall` binary with a hard
+   timeout, validates schema v1, and either:
+   - in `shadow` mode (the default), appends a bounded observation record and
+     emits no model-visible context; or
+   - in explicit `live` mode, emits a strictly bounded
+     `hookSpecificOutput.additionalContext` containing recalled entries marked
+     as untrusted historical data.
+3. Keep configuration host-side through environment variables. A missing
+   corpus, missing binary, timeout, malformed output, unknown schema, logging
+   failure, or zero-result recall exits successfully with no injected context.
+4. Add an explicit-recall skill that teaches Codex to invoke the existing
+   `enso-recall` CLI without introducing a second recall implementation.
+5. Test the hook at the process boundary with fake recall executables: shadow,
+   live, bounding, malformed JSON, schema mismatch, timeout, and missing
+   configuration. Validate the plugin manifest and run the repository gates.
+
+**Adapter dependency exception:** the hook wrapper may use Python 3 standard
+library only. This is host glue, not core logic; official Codex hook examples
+use command scripts, and committing a prebuilt Go executable would make the
+plugin platform-specific. The memory engine remains the existing Go binary.
+
+**Explicit non-goals:** automatic capture; canonical writes of any kind;
+supersession approval or commit; `Stop`/material-use telemetry;
+`core.MarkRecalled`; MCP; a daemon or sidecar; transcript parsing; native
+Codex-memory replacement; global marketplace installation; any change under
+`internal/core`, `internal/mdstore`, or `internal/graphstore`; any new recall
+heuristic or score threshold without real Codex evidence.
+
+**LoC budget:** +250 production lines in the Codex host adapter (tests and docs
+excluded). No non-stdlib dependency.
+
+**Definition of done:**
+- [x] Plugin scaffold validates with the system plugin validator
+- [x] `UserPromptSubmit` shadow/live process tests pass
+- [x] Every adapter failure is fail-open for ordinary Codex operation and
+      fail-closed for context injection
+- [x] Live context is deterministically bounded and identifies memory IDs
+- [x] An end-to-end hook invocation over a real-shaped temporary corpus
+      surfaces the current entry and suppresses the superseded entry
+- [x] `make check` and `make test-race` green; verdict recorded in
+      `ENSO-STATUS.md`
+
+---
+
+## 14. Reporting cadence
 
 At each WP close: update `ENSO-STATUS.md` (checkboxes + one-paragraph verdict),
 run `make check` + `make test-race`, re-pin drift hashes if any `docs/` source

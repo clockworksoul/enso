@@ -1,0 +1,8 @@
+{
+  "mode": "shadow",
+  "corpus_root": "/absolute/path/to/corpus-root",
+  "enso_binary": "/absolute/path/to/enso-recall",
+  "top_k": 5,
+  "timeout_ms": 4000,
+  "max_context_chars": 4000
+}

@@ -1,0 +1,26 @@
+{
+  "name": "enso-memory",
+  "version": "0.1.0",
+  "description": "Portable, supersession-aware Ensō recall for Codex.",
+  "author": {
+    "name": "Clockworksoul",
+    "url": "https://github.com/clockworksoul"
+  },
+  "homepage": "https://github.com/clockworksoul/enso",
+  "repository": "https://github.com/clockworksoul/enso",
+  "license": "MIT",
+  "keywords": ["memory", "recall", "codex", "enso"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Ensō Memory",
+    "shortDescription": "Portable, auditable long-term recall for Codex.",
+    "longDescription": "Recalls relevant entries from an Ensō Markdown corpus before Codex handles a prompt. Starts in observation-only shadow mode and supports explicitly enabled, strictly bounded context injection.",
+    "developerName": "Clockworksoul",
+    "category": "Productivity",
+    "capabilities": ["Recall", "Context"],
+    "defaultPrompt": [
+      "Recall what Ensō knows about this project.",
+      "Check whether this contradicts an existing memory."
+    ]
+  }
+}

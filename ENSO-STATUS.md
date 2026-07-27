@@ -14,7 +14,7 @@
 | P2 | **Index** — KùzuDB graph plugin in `memory` slot | #3 vocabulary drift, #4 staleness at retrieval | ✅ CLOSED (WP-3/WP-4, Jul 18) — gate PASSED 1.00 P@1 |
 | P3 | **Texture** — leaky-integrator decay | ranking quality, temporal texture | ✅ CLOSED (WP-5, Jul 18) — RECALL-DEF bump wired |
 
-**Where the project actually stands (Jul 27):** the substrate (Phases 0–3, WP-0 through WP-7) is fully built, gated, and closed. Nothing is currently in active development — the only defined remaining seam (WP-8: decide whether Ensō takes the live `memory` slot) is explicitly blocked on real shadow-mode log data that does not exist yet (`.enso/shadow/` on the host corpus is still empty as of Jul 23/24). Recent work since Jul 18 has been **housekeeping and hardening only** — real bugs found via actually running the tools against the live corpus, not manufactured busywork. See "Post-WP-7 housekeeping" below.
+**Where the project actually stands (Jul 27):** the substrate (Phases 0–3, WP-0 through WP-7) and the Codex protocol adapter (WP-C0) are fully built, gated, and closed. No work package is currently open. The OpenClaw-only WP-8 seam (decide whether Ensō takes that host's live `memory` slot) remains separately blocked on real shadow-mode log data that does not exist yet (`.enso/shadow/` on the OpenClaw corpus is still empty as of Jul 23/24). Recent work before WP-C0 opened was **housekeeping and hardening only** — real bugs found via actually running the tools against the live corpus, not manufactured busywork. See "Post-WP-7 housekeeping" below.
 
 ---
 
@@ -160,6 +160,12 @@ running the tools against the real corpus/environment rather than manufactured w
   containing directory. npm package renamed `@clockworksoul/enso-memory-enso` →
   `@clockworksoul/enso-openclaw` to match. README.md and this file's remaining
   `host/memory-enso`/`extensions/memory-enso` references updated to `host/openclaw`.
+- **2026-07-27 — OpenClaw package nested at `host/openclaw/enso-memory/`.**
+  With Codex now at `host/codex/enso-memory/` and additional plugins possible,
+  Matt chose the symmetric `host/<host-name>/<plugin-name>/` layout. This is
+  another source-tree-only move: the OpenClaw plugin id (`memory-enso`), npm
+  package name, configuration key, runtime behavior, and corpus contract are
+  unchanged.
 - **2026-07-25 — `mdstore` write-time robustness (`parse.go`).** A live-corpus
   `enso-recall` run against the real `memory/` files found two entries silently
   dropping whole daily files from the corpus: a hand-typed lowercase `type: fact`, and a
@@ -177,6 +183,34 @@ running the tools against the real corpus/environment rather than manufactured w
 **Current build health (verified 2026-07-27):** `make check` green — `go vet ./...`,
 `go build ./...`, `go test ./...` all packages pass, `enso-spec-drift.sh` reports all 7
 sources IN SYNC.
+
+## WP-C0 CLOSED — Codex protocol adapter (2026-07-27)
+
+**Verdict: the same Ensō corpus and recall bridge now drive a second host.**
+`host/codex/enso-memory/` is a validated Codex plugin with a
+`UserPromptSubmit` command hook and explicit-recall skill. It defaults to
+observation-only `shadow` mode; explicit `live` mode emits strictly bounded
+developer context whose entries carry memory IDs and are labeled untrusted
+historical claims. Configuration is adapter-only (plugin-data JSON or
+environment overrides), and telemetry stores prompt hashes plus result
+IDs/scores—not prompt text or recalled content.
+
+- **Failure containment:** missing configuration/corpus/binary, timeout,
+  nonzero bridge exit, oversized output, malformed JSON, schema mismatch,
+  zero usable results, and log-write failure all exit 0 with no injected
+  context. Six Python process tests cover shadow, live bounding/escaping,
+  missing config, malformed/schema-mismatch output, timeout, and off mode.
+- **Real bridge E2E:** a Go integration test builds the actual
+  `cmd/enso-recall`, creates a real-shaped canonical Markdown corpus with a
+  supersession pair, submits a Codex hook event, and proves live context
+  contains the current entry while omitting the stale entry.
+- **Boundaries:** no change under `internal/core`, `internal/mdstore`, or
+  `internal/graphstore`; no corpus writes, capture, material-use bump, MCP,
+  daemon, transcript parsing, or marketplace installation.
+- **DoD:** ✅ plugin + bundled skill validators green · ✅ 6/6 hook process
+  tests · ✅ real-binary E2E green · ✅ `make check` (now includes Codex Python
+  tests) · ✅ `make test-race` · ✅ drift IN SYNC. **Budget:** 232
+  nonblank/non-comment adapter lines vs +250.
 
 ## WP-7 CLOSED — OpenClaw shadow-mode host adapter (2026-07-18)
 
