@@ -45,7 +45,12 @@ function registerPlugin(config: Record<string, unknown>) {
   const warnings: string[] = [];
 
   const fakeApi = {
-    config,
+    // NOTE (2026-07-26): the plugin reads api.pluginConfig (scoped config),
+    // not api.config (whole-host config) -- this fake mirrors the real SDK
+    // shape so a test-harness drift can't mask the same bug that shipped to
+    // the real gateway for ~24h (fixed in index.ts the same day).
+    config: {},
+    pluginConfig: config,
     logger: {
       info() {},
       warn(message: string) {

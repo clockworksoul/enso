@@ -106,7 +106,15 @@ export default definePluginEntry({
   description:
     "Shadow-mode observer for the Ensō memory system: logs Ensō recall vs flat-file recall divergence without touching the turn.",
   register(api: OpenClawPluginApi) {
-    const cfg = resolveMemoryEnsoConfig(api.config);
+    // NOTE (2026-07-26 bugfix): api.config is the whole-host OpenClawConfig,
+    // not this plugin's scoped config -- api.pluginConfig is the correct field
+    // (maps to plugins.entries.memory-enso.config). Using api.config here for
+    // the first ~24h after wiring silently meant every field fell back to its
+    // default; corpusRoot/shadowLogDir defaults happened to match the real
+    // configured paths (masking the bug), but the default ensoBinary ("enso-recall",
+    // bare, not on PATH) does not, so every shadow call failed ENOENT and 100%
+    // of records were enso_error until this fix.
+    const cfg = resolveMemoryEnsoConfig(api.pluginConfig);
     if (!cfg.enabled) {
       api.logger.info("memory-enso: disabled by config; shadow observation off");
       return;
