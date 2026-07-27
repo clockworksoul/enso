@@ -76,7 +76,9 @@ function readRecords(shadowLogDir: string): ShadowRecord[] {
     return [];
   }
   const out: ShadowRecord[] = [];
-  for (const f of fs.readdirSync(shadowLogDir)) {
+  // .jsonl only: status.json (the 2026-07-27 plugin-health file) lives in
+  // the same directory now and must not be mistaken for a divergence record.
+  for (const f of fs.readdirSync(shadowLogDir).filter((name) => name.endsWith(".jsonl"))) {
     const lines = fs.readFileSync(path.join(shadowLogDir, f), "utf-8").trim().split("\n");
     for (const line of lines) {
       if (line !== "") {
@@ -85,6 +87,14 @@ function readRecords(shadowLogDir: string): ShadowRecord[] {
     }
   }
   return out;
+}
+
+function readStatusFile(shadowLogDir: string): unknown {
+  const p = path.join(shadowLogDir, "status.json");
+  if (!fs.existsSync(p)) {
+    return undefined;
+  }
+  return JSON.parse(fs.readFileSync(p, "utf-8"));
 }
 
 describe("memory-enso plugin entry", () => {

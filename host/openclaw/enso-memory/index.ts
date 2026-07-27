@@ -21,6 +21,7 @@ import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
 import { resolveMemoryEnsoConfig, type MemoryEnsoConfig } from "./config.js";
 import { runEnsoRecall } from "./enso-bridge.js";
 import { appendShadowRecord, truncateText, turnKey, type ShadowRecord } from "./shadow-log.js";
+import { recordOutcome } from "./status.js";
 
 /** Tool names whose results the flat-file observer records for comparison. */
 const OBSERVED_MEMORY_TOOLS = new Set(["memory_search", "memory_recall", "memory_get"]);
@@ -53,6 +54,26 @@ function safeAppend(api: OpenClawPluginApi, cfg: MemoryEnsoConfig, record: Shado
   }
 }
 
+// 2026-07-27 (post-incident): report health through the plugin itself, not
+// just through the append-only JSONL log. recordOutcome overwrites one small
+// status.json with the CURRENT state on every recall attempt, so an external
+// checker can answer "is Ensō healthy right now" by reading a few bytes
+// instead of tailing and heuristically scoring a growing log. Same fail-safe
+// contract as safeAppend: a status-file write failure must never escalate.
+function safeRecordOutcome(
+  api: OpenClawPluginApi,
+  cfg: MemoryEnsoConfig,
+  ts: string,
+  ok: boolean,
+  error?: string,
+): void {
+  try {
+    recordOutcome(cfg.shadowLogDir, ts, ok, error);
+  } catch (err) {
+    api.logger.warn(`memory-enso: status file write failed: ${String(err)}`);
+  }
+}
+
 /** Shared by the shadow hook and the manual tool: recall + log, never throw. */
 async function shadowRecall(
   api: OpenClawPluginApi,
@@ -74,6 +95,7 @@ async function shadowRecall(
       used: "unknown",
     };
     safeAppend(api, cfg, record);
+    safeRecordOutcome(api, cfg, ts, false, outcome.error);
     return record;
   }
   const record: ShadowRecord = {
@@ -97,6 +119,7 @@ async function shadowRecall(
     used: "unknown",
   };
   safeAppend(api, cfg, record);
+  safeRecordOutcome(api, cfg, ts, true);
   return record;
 }
 
