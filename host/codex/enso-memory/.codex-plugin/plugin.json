@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/clockworksoul/enso",
   "repository": "https://github.com/clockworksoul/enso",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["memory", "recall", "codex", "enso"],
   "skills": "./skills/",
   "interface": {
