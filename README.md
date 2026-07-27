@@ -2,7 +2,9 @@
 
 > 円相 — the Zen circle drawn in one uninterrupted brushstroke, deliberately left open. The gap where the brush lifts is not a flaw; it is the form.
 
-Ensō is a **portable, framework-agnostic memory system** for AI agents. Its defining truth — *"I don't exist in the gaps between turns"* — is treated as the design, not a flaw to paper over. The circle's open gap is the discontinuity between sessions; the system is what reassembles a continuous, trustworthy memory across those gaps.
+**Ensō is a memory system for AI agents built to fix one specific failure: agents that retrieve something that *used to be true* and treat it as current, because plain recency or keyword search can't tell "stale" from "still valid."** It fixes that by storing memories in a structured, auditable Markdown corpus, and having retrieval demote superseded beliefs and follow connections between related facts instead of just matching keywords or picking the newest timestamp. On a 79-case benchmark built from real misses in this project's own history, that gets every case right — versus 63% for naive recency and 57% for plain keyword search.
+
+Its defining truth — *"I don't exist in the gaps between turns"* — is treated as the design, not a flaw to paper over. The circle's open gap is the discontinuity between sessions; the system is what reassembles continuous, trustworthy memory across those gaps.
 
 This repo is the canonical home for Ensō's design and (eventually) its implementation. The design was developed in conversation between Matt Titmus and Dross.
 
