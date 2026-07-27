@@ -49,7 +49,15 @@ export function runEnsoRecall(cfg: MemoryEnsoConfig, query: string): Promise<Bri
       (error, stdout, stderr) => {
         const spawnMs = Date.now() - started;
         if (error) {
-          const detail = stderr.trim() !== "" ? `: ${stderr.trim()}` : "";
+          // Node's execFile error.message ALREADY embeds stderr for a
+          // nonzero-exit failure ("Command failed: <cmd>\n<stderr>"), so
+          // appending stderr again below double-prints the same text.
+          // Only append stderr separately when it's NOT already contained
+          // in error.message (e.g. a spawn-level failure like ENOENT,
+          // where stderr is empty anyway and this is a no-op).
+          const trimmedStderr = stderr.trim();
+          const alreadyIncluded = trimmedStderr !== "" && error.message.includes(trimmedStderr);
+          const detail = trimmedStderr !== "" && !alreadyIncluded ? `: ${trimmedStderr}` : "";
           resolve({ ok: false, error: `${error.message}${detail}`, spawnMs });
           return;
         }

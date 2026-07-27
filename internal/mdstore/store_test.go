@@ -2,6 +2,7 @@ package mdstore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,5 +187,65 @@ func TestFSStore_EmptyLoad(t *testing.T) {
 	}
 	if entries != nil || edges != nil {
 		t.Errorf("empty corpus should return nil slices, got %v/%v", entries, edges)
+	}
+}
+
+// TestFSStore_LoadIsolatesPerFileFailure is the regression test for the
+// 2026-07-27 incident: a single malformed daily file must NOT take down the
+// rest of the corpus. One bad file among several good ones should still
+// yield every entry from the good files, plus a reported failure for the
+// bad one — not a total load failure.
+func TestFSStore_LoadIsolatesPerFileFailure(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two good files, one malformed (missing required "content" key, exactly
+	// today's real-world shape).
+	good1 := "### mem:2026-06-19-a\n- type: Fact\n- content: first\n- encoded_time: 2026-06-19T10:00:00Z\n- confidence: high\n- tags: []\n"
+	bad := "### mem:2026-06-20-bad\n- type: Insight\n- tags: [x]\n- about: [y]\n- some content with no key label\n"
+	good2 := "### mem:2026-06-21-b\n- type: Fact\n- content: second\n- encoded_time: 2026-06-21T10:00:00Z\n- confidence: high\n- tags: []\n"
+
+	for name, content := range map[string]string{
+		"2026-06-19.md": good1,
+		"2026-06-20.md": bad,
+		"2026-06-21.md": good2,
+	} {
+		if err := os.WriteFile(filepath.Join(memDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := NewFSStore(dir)
+	ctx := context.Background()
+
+	// Load() must still succeed with the good entries, per-file isolation.
+	entries, _, err := s.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load should not fail the whole corpus on one bad file, got: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want 2 entries from the two good files, got %d: %+v", len(entries), entries)
+	}
+
+	// LoadWithErrors must surface the failure explicitly, scoped to the bad file.
+	entries2, _, failures, firstErr := s.LoadWithErrors(ctx)
+	if len(entries2) != 2 {
+		t.Fatalf("LoadWithErrors: want 2 entries, got %d", len(entries2))
+	}
+	if len(failures) != 1 {
+		t.Fatalf("want exactly 1 failure, got %d: %v", len(failures), failures)
+	}
+	if firstErr == nil {
+		t.Fatal("want a non-nil firstErr when a failure occurred")
+	}
+	var lfe *LoadFileError
+	if !errors.As(failures[0], &lfe) {
+		t.Fatalf("failure should be a *LoadFileError, got %T", failures[0])
+	}
+	if !strings.Contains(lfe.Path, "2026-06-20.md") {
+		t.Errorf("LoadFileError.Path should name the bad file, got %q", lfe.Path)
 	}
 }

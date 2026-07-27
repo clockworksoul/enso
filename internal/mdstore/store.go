@@ -2,6 +2,7 @@ package mdstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -173,17 +174,71 @@ func (s *FSStore) Supersede(ctx context.Context, old, new core.Entry) error {
 // Files are read in sorted (chronological, given the YYYY-MM-DD naming) order
 // so the returned slices have a stable, time-ordered shape. Parse errors are
 // loud: the first malformed block aborts Load with a located error.
+// LoadFileError names one daily file that failed to parse during Load, with
+// the underlying parse error. Load isolates failures per file (2026-07-27,
+// post-incident: a single malformed block in one daily file previously
+// failed the ENTIRE corpus load — every other file, however clean, went
+// unavailable along with it). A LoadFileError is still loud (returned to the
+// caller, never swallowed) but it is scoped to the one bad file so the rest
+// of the corpus remains usable.
+type LoadFileError struct {
+	Path string
+	Err  error
+}
+
+func (e *LoadFileError) Error() string {
+	return fmt.Sprintf("mdstore: in %s: %v", e.Path, e.Err)
+}
+
+func (e *LoadFileError) Unwrap() error { return e.Err }
+
+// Load implements core.Store. Per-file isolation (2026-07-27): a malformed
+// daily file is skipped, not fatal to the rest of the corpus, so Load
+// returns every entry/edge from every file that DID parse cleanly and a nil
+// error as long as at least the directory itself was readable. This is a
+// deliberate best-effort default because every existing caller of Load
+// (enso-recall, enso-load-check, the graph rebuild, the core recall path)
+// treats a non-nil error as fatal and would otherwise still lose the WHOLE
+// corpus to one bad file, exactly the failure this fix exists to prevent.
+// Per-file failures are never silently dropped, though — they still exist,
+// loudly, via LoadWithErrors (which callers that specifically want to
+// detect/alert on corpus health, e.g. enso-load-check and the nightly audit
+// cron, call directly instead of Load).
 func (s *FSStore) Load(ctx context.Context) ([]core.Entry, []core.Edge, error) {
+	entries, edges, _, err := s.LoadWithErrors(ctx)
+	if err != nil {
+		// LoadWithErrors' single error return doubles as "first per-file
+		// failure" once the directory itself was readable. A *LoadFileError
+		// is exactly that case — isolated to one file, not fatal to Load—
+		// and must NOT propagate here, or Load regains the pre-2026-07-27
+		// all-or-nothing behavior this fix exists to remove. Anything else
+		// (context cancellation, directory unreadable) is a real fatal error.
+		var lfe *LoadFileError
+		if !errors.As(err, &lfe) {
+			return entries, edges, err
+		}
+	}
+	return entries, edges, nil
+}
+
+// LoadWithErrors is Load's per-file-isolated form: a malformed daily file is
+// skipped (not fatal to the whole corpus) and reported back as a
+// LoadFileError, alongside everything that DID load successfully from every
+// other file. The plain error return is non-nil (first failure, for callers
+// that just want a go/no-go signal and don't care which file); the []error
+// return carries every failure, for callers that want to report or alert on
+// all of them.
+func (s *FSStore) LoadWithErrors(ctx context.Context) ([]core.Entry, []core.Edge, []error, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	dir := s.memoryDir()
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, nil // empty corpus is valid
+			return nil, nil, nil, nil // empty corpus is valid
 		}
-		return nil, nil, fmt.Errorf("mdstore: readdir %s: %w", dir, err)
+		return nil, nil, nil, fmt.Errorf("mdstore: readdir %s: %w", dir, err)
 	}
 	names := make([]string, 0, len(ents))
 	for _, de := range ents {
@@ -196,20 +251,29 @@ func (s *FSStore) Load(ctx context.Context) ([]core.Entry, []core.Edge, error) {
 
 	var entries []core.Entry
 	var edges []core.Edge
+	var failures []error
 	for _, name := range names {
 		path := filepath.Join(dir, name)
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
-			return nil, nil, fmt.Errorf("mdstore: read %s: %w", path, rerr)
+			// A read failure (permissions, race with deletion) is treated the
+			// same as a parse failure: isolate to this file, keep going.
+			failures = append(failures, &LoadFileError{Path: path, Err: rerr})
+			continue
 		}
 		es, eds, perr := Parse(string(data))
 		if perr != nil {
-			return nil, nil, fmt.Errorf("mdstore: in %s: %w", path, perr)
+			failures = append(failures, &LoadFileError{Path: path, Err: perr})
+			continue
 		}
 		entries = append(entries, es...)
 		edges = append(edges, eds...)
 	}
-	return entries, edges, nil
+	var firstErr error
+	if len(failures) > 0 {
+		firstErr = failures[0]
+	}
+	return entries, edges, failures, firstErr
 }
 
 // compile-time assertion that FSStore satisfies the port.
