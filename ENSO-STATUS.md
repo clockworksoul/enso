@@ -1,27 +1,32 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-07-11.*
+*Single source of truth for where we are and what done looks like. Updated 2026-07-27.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
 
 ---
 
-## Architecture at a glance
+## Architecture at a glance — ALL PHASES CLOSED (2026-07-18)
 
 | Phase | Piece | Fixes | Status |
 |---|---|---|---|
-| P0 | **Trigger** — active-memory plugin | #1 silent non-retrieval | ✅ Live since Jun 17 |
-| P1 | **Corpus** — structured Markdown format | #2 unauditable consolidation, partial #4 staleness | 🔨 Next |
-| P2 | **Index** — KùzuDB graph plugin in `memory` slot | #3 vocabulary drift, #4 staleness at retrieval | ⬜ Blocked on P1 |
-| P3 | **Texture** — leaky-integrator decay | ranking quality, temporal texture | ⬜ Blocked on P2 |
+| P0 | **Trigger** — active-memory plugin | #1 silent non-retrieval | ✅ Live Jun 17 → CLOSED Jul 23 (benchmark concluded, plugin disabled) |
+| P1 | **Corpus** — structured Markdown format | #2 unauditable consolidation, partial #4 staleness | ✅ CLOSED (WP-1/WP-2, Jul 11–14) |
+| P2 | **Index** — KùzuDB graph plugin in `memory` slot | #3 vocabulary drift, #4 staleness at retrieval | ✅ CLOSED (WP-3/WP-4, Jul 18) — gate PASSED 1.00 P@1 |
+| P3 | **Texture** — leaky-integrator decay | ranking quality, temporal texture | ✅ CLOSED (WP-5, Jul 18) — RECALL-DEF bump wired |
+
+**Where the project actually stands (Jul 27):** the substrate (Phases 0–3, WP-0 through WP-7) is fully built, gated, and closed. Nothing is currently in active development — the only defined remaining seam (WP-8: decide whether Ensō takes the live `memory` slot) is explicitly blocked on real shadow-mode log data that does not exist yet (`.enso/shadow/` on the host corpus is still empty as of Jul 23/24). Recent work since Jul 18 has been **housekeeping and hardening only** — real bugs found via actually running the tools against the live corpus, not manufactured busywork. See "Post-WP-7 housekeeping" below.
 
 ---
 
-## Phase 0 — LIVE ✅
+## Phase 0 — CLOSED ✅ (benchmark concluded 2026-07-23)
 
-Turned on the stock `active-memory` plugin (Jun 17). Benchmarking flat-file recall.
-This is the **control group**: every later phase must beat it or it doesn't ship.
+Turned on the stock `active-memory` plugin (Jun 17) as the **control group** — every later phase had to beat it or it doesn't ship. Ran through Jul 14 (own decision rule triggered on Day 6 at 5+ flagged misses), plugin disabled Jul 14 for cost.
 
-Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
+**Verdict written 2026-07-23** (`research/2026-07-23-phase0-benchmark-closing-report.md`, workspace repo — mined all 30 FLAGGED-MISS refs down to 7 distinct real misses): the DRM/gist-centroid-confabulation prediction is **CONFIRMED strongly — zero NOISE across all 7 misses**. Split: 43% STALE / 29% FABRICATION / 29% NEIGHBOR — every miss was a plausible semantic neighbor, a once-true stale belief, or a confident confabulation, never random noise. Honest negative: the original quantitative metrics ((a)-(d)) failed because `persistTranscripts` was never enabled, so the plugin stayed opaque the whole run — Phase 0 validated the *error model*, not plugin performance. Sample is small (n=7, caught misses only); treat the STALE/FAB/NEIGHBOR split as directional, not a precise distribution.
+
+**Why this matters for Ensō specifically:** the 43% STALE plurality is exactly the failure class Ensō's supersession machinery provably kills (WP-4 gate: 79/79, supersession edge +0.43 load-bearing over specificity alone). The 7-miss set is also the first labeled real-miss corpus outside the git-history benchmark — a small but genuine proxy for what WP-8's still-missing shadow-log corpus will eventually need to look like at scale.
+
+Benchmark log: `docs/2026-06-17-phase0-benchmark.md`. Closing report: `research/2026-07-23-phase0-benchmark-closing-report.md` (workspace repo, not this one).
 
 ---
 
@@ -103,6 +108,57 @@ Benchmark log: `docs/2026-06-17-phase0-benchmark.md`
 - **Kept:** entry model + store port + mdstore adapter (P1 infrastructure), decay math + ranking (P3 math), benchmark harness with real cases
 - **Deleted (Jul 8):** detection/correction layer (`core/correction.go`, `core/detect.go`, `core/contradict.go`, `internal/confirm/`), fabrication probes, synthetic expectations, harvest harness
 - **Resolved gap (verified 2026-07-11):** reserved P3 fields (`last_ref_time`, `S_last`, `S_floor`, `lambda`, `S_cap`) ARE present and mutually consistent across the golden file, `marshal.go`, `parse.go`, and `core/types.go`. No work needed — this open-gap note is retired.
+
+## Post-WP-7 housekeeping (2026-07-21 through 2026-07-27) — no phase reopened
+
+All of WP-0 through WP-7 remain CLOSED. WP-8 remains correctly undefined — still blocked
+on real shadow-log data (`.enso/shadow/` on the live host corpus was confirmed empty as
+of both Jul 23 and Jul 24). Six small fixes landed in this window, all found by actually
+running the tools against the real corpus/environment rather than manufactured work:
+
+- **2026-07-21 — `enso-lint` walks directories.** The Jul-17 write-time guard never
+  actually fired on any of the Jul-13/14/15/20 malformed-file misses it was built to
+  catch, because `enso-lint memory/` errored "is a directory" instead of walking it.
+  Fixed: `targets()` now walks a positional dir like `-dir` does. +tests.
+- **2026-07-22 — hermetic `enso-recall` test.** `TestRecallJSONShape` asserted
+  `mode=="lexical"` on the premise "no `GEMINI_API_KEY` in the test env," but the Dross
+  Hour / service environment has that key set, so the test ran the live embedder against
+  the tiny un-embedded temp corpus and got `"degraded"` instead — passed interactively,
+  failed under cron. Fixed with `t.Setenv("GEMINI_API_KEY", "")`. Also cleaned a stray
+  3MB `enso-lint` binary that snuck into a commit via `git add -A`; gitignored stray
+  root-built cmd binaries generally.
+- **2026-07-23 — stray `harvest` binary removed + gitignored.** Source was deleted
+  2026-07-08 in the detection/correction-layer purge; the compiled binary at repo root
+  survived untracked and ungitignored until now.
+- **2026-07-23 — README given an honest OpenClaw-integration status section.** States
+  plainly: Ensō does not yet serve live recall anywhere; only shadow mode exists
+  (`cmd/enso-recall` + `extensions/memory-enso` observing in parallel, zero effect on
+  live behavior). Flags that the shadow extension's home on a `clockworksoul/openclaw`
+  fork was a WP-7-spike shortcut, not an architectural requirement.
+- **2026-07-25 — `memory-enso` extension lifted out of the OpenClaw fork into this
+  repo** (`host/memory-enso/`, from `clockworksoul/openclaw` branch
+  `claude/memory-enso-shadow`). No fork of the whole OpenClaw monorepo is needed to
+  maintain one extension — the plugin only ever depended on `openclaw/plugin-sdk/*`,
+  both public exports of the published `openclaw` npm package, so it now depends on
+  `openclaw` as a normal package dependency. This directly executes the Jul-23 README
+  follow-up ("repackage as a standalone installable plugin").
+- **2026-07-25 — `mdstore` write-time robustness (`parse.go`).** A live-corpus
+  `enso-recall` run against the real `memory/` files found two entries silently
+  dropping whole daily files from the corpus: a hand-typed lowercase `type: fact`, and a
+  stray `### mem: entries` prose heading that looked like an entry block. Fixed with
+  (1) `normalizeNodeType()` case-folding the raw type against the known enum before
+  validation — genuinely unknown types still hard-reject exactly as the 2026-07-12 WP-2
+  Q-A decision requires (type is load-bearing for decay math); (2) `blockHeader()` now
+  requires `mem:` be immediately followed by a 4-digit year (`^mem:\d{4}`) before
+  treating a heading as an entry-block attempt, matching the doc comment's already-stated
+  intent — a genuinely malformed id (bad month, bad slug) still routes to
+  `Entry.Validate()` and fails loudly as before; only headings that were never attempting
+  an id are spared. Scoped to `internal/mdstore/parse.go` only.
+- **2026-07-27 — Dross Hour output, no code touched.** `dross/2026-07-27-memory-science-to-ai-design-principles.md` (workspace repo) converts the Jun-23 CLS-grounding doc + the Jul-23 Phase-0 closing report into 4 portable AI-memory design principles. Stopped at the seam deliberately — did not propose a new subsystem; the only buildable primitive (correction-capture) already exists in Ensō.
+
+**Current build health (verified 2026-07-27):** `make check` green — `go vet ./...`,
+`go build ./...`, `go test ./...` all packages pass, `enso-spec-drift.sh` reports all 7
+sources IN SYNC.
 
 ## WP-7 CLOSED — OpenClaw shadow-mode host adapter (2026-07-18)
 
