@@ -37,3 +37,6 @@ go.work.sum
 /enso-append
 /enso-load-check
 /harvest
+
+# Codex memory files
+.learnings
