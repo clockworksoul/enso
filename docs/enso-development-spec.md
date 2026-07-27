@@ -427,9 +427,10 @@ the user experience is byte-identical.
    in output). Flags: corpus root, query, top-k, as-of. Output: versioned JSON
    (results with id/content/scores, mode, degraded). Read-only by
    construction: the binary NEVER writes to the corpus.
-2. **Host side (`clockworksoul/openclaw` fork):** `extensions/memory-enso` — a
-   TS extension mirroring the stock extensions' layout. NOT `kind: memory` (it
-   never claims the slot in WP-7). Registers the two observation hooks, spawns
+2. **Host side (`host/openclaw/` in this repo, as of the 2026-07-25
+   lift-and-shift + 2026-07-27 rename from `host/memory-enso/`):** a
+   TS extension (plugin id `memory-enso`) mirroring the stock extensions'
+   layout. NOT `kind: memory` (it never claims the slot in WP-7). Registers the two observation hooks, spawns
    `enso-recall` per event with a hard timeout, and appends one JSONL record
    per observed turn to a shadow log under the workspace
    (`.enso/shadow/YYYY-MM-DD.jsonl`): timestamp, query context hash, Ensō

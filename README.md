@@ -131,16 +131,16 @@ Capture *detection* — recognizing a correction from a raw utterance — **retu
 ### What exists now (shadow mode)
 
 - **`cmd/enso-recall`** (this repo): a one-shot, read-only CLI. Given a corpus root and a query, it loads the Markdown corpus, rebuilds the in-memory graph, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It never writes to the corpus.
-- **`extensions/memory-enso`**: a TypeScript OpenClaw extension that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on `memory_search`) alongside whatever plugin already owns the `memory` slot. For every turn, it spawns `enso-recall` with a hard timeout, and appends one JSONL record comparing Ensō's answer to the flat-file search's answer to a shadow log (`.enso/shadow/YYYY-MM-DD.jsonl`). It never modifies the turn, never claims the `memory` slot, and fails silently (logged, swallowed) on any error or timeout.
+- **`host/openclaw`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on `memory_search`) alongside whatever plugin already owns the `memory` slot. For every turn, it spawns `enso-recall` with a hard timeout, and appends one JSONL record comparing Ensō's answer to the flat-file search's answer to a shadow log (`.enso/shadow/YYYY-MM-DD.jsonl`). It never modifies the turn, never claims the `memory` slot, and fails silently (logged, swallowed) on any error or timeout.
 
-That's the entire integration surface: parallel observation, zero effect on live behavior. It exists to generate the evidence (real divergence cases) that a future slot-takeover decision (WP-8) would need — WP-8 is deliberately left unscoped until that evidence exists.
+That's the entire integration surface today: parallel observation, zero effect on live behavior. It exists to generate the evidence (real divergence cases) that a future slot-takeover decision (WP-8) would need — WP-8 is deliberately left unscoped until that evidence exists.
 
-**Current limitation:** the extension was built inside a `clockworksoul/openclaw` fork (branch `claude/memory-enso-shadow`) during the WP-7 spike, mirroring the layout OpenClaw uses for its own bundled/in-core plugins. That layout convention only applies to plugins shipped inside OpenClaw core — it is **not required** for a normal plugin. Per the OpenClaw plugin SDK, any plugin just needs `package.json` (with an `openclaw` block), an `openclaw.plugin.json` manifest, and an entry point via `definePluginEntry`; it installs like any other package (`openclaw plugins install clawhub:<pkg>`, a git URL, or a local path) with no core-repo fork needed. Repackaging `extensions/memory-enso` as a standalone installable package (rather than fork-only) is an open, low-effort follow-up — tracked here, not yet done.
+**Host layout:** each supported host gets its own directory under `host/` (`host/openclaw/` today; `host/codex/` is planned as the second host adapter). This standalone-per-host layout was adopted 2026-07-27 specifically because a second host is a confirmed near-term plan, not a speculative one — a single `host/memory-enso/` directory implicitly OpenClaw-shaped would have needed a real migration once Codex support started, versus a cheap rename now while there's only one host to move.
 
 ### If you want to try shadow mode today
 
 1. Build `cmd/enso-recall` from this repo (`go build ./cmd/enso-recall`) and confirm it runs against your own Markdown memory corpus.
-2. Pull `extensions/memory-enso` from the `clockworksoul/openclaw` fork's `claude/memory-enso-shadow` branch (until it's repackaged as a standalone plugin, this means checking out that fork rather than a normal plugin install).
+2. Use `host/openclaw/` directly from this repo (as of 2026-07-27 it's a normal standalone package here, no `clockworksoul/openclaw` fork checkout needed).
 3. Point it at your `enso-recall` binary and corpus root per the extension's own README.
 4. Watch `.enso/shadow/YYYY-MM-DD.jsonl` accumulate divergence records. Nothing about your live memory recall changes.
 

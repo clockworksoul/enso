@@ -132,7 +132,7 @@ running the tools against the real corpus/environment rather than manufactured w
   survived untracked and ungitignored until now.
 - **2026-07-23 — README given an honest OpenClaw-integration status section.** States
   plainly: Ensō does not yet serve live recall anywhere; only shadow mode exists
-  (`cmd/enso-recall` + `extensions/memory-enso` observing in parallel, zero effect on
+  (`cmd/enso-recall` + the OpenClaw host extension observing in parallel, zero effect on
   live behavior). Flags that the shadow extension's home on a `clockworksoul/openclaw`
   fork was a WP-7-spike shortcut, not an architectural requirement.
 - **2026-07-25 — `memory-enso` extension lifted out of the OpenClaw fork into this
@@ -142,6 +142,24 @@ running the tools against the real corpus/environment rather than manufactured w
   both public exports of the published `openclaw` npm package, so it now depends on
   `openclaw` as a normal package dependency. This directly executes the Jul-23 README
   follow-up ("repackage as a standalone installable plugin").
+- **2026-07-26 — `memory-enso` config-read bugfix.** `register()` was reading
+  `api.config` (whole-host config) instead of `api.pluginConfig` (this plugin's scoped
+  config) — two defaulted fields happened to coincide with the real configured paths,
+  masking it, but `ensoBinary`'s bare default (`"enso-recall"`, not on PATH) did not, so
+  every shadow call failed `ENOENT` for ~24h (100% `enso_error` records, zero usable
+  divergence data that whole window). Fixed; test harness's fake API updated to mirror
+  the real SDK shape so a regression here fails the test instead of passing silently.
+  20/20 vitest tests green.
+- **2026-07-27 — `host/memory-enso/` renamed to `host/openclaw/`.** Matt confirmed a
+  second host adapter (Codex, for work use) is a concrete near-term plan, not a someday
+  maybe — so the `host/<host-name>/` layout was adopted now, while there's only one host
+  to move, rather than deferred into a real migration once Codex support starts. Purely
+  a source-tree change: the plugin's `id` (`memory-enso`) and config key
+  (`plugins.entries.memory-enso.config`) are unaffected — confirmed via
+  `openclaw.plugin.json`, which is what's actually visible at install/runtime, not the
+  containing directory. npm package renamed `@clockworksoul/enso-memory-enso` →
+  `@clockworksoul/enso-openclaw` to match. README.md and this file's remaining
+  `host/memory-enso`/`extensions/memory-enso` references updated to `host/openclaw`.
 - **2026-07-25 — `mdstore` write-time robustness (`parse.go`).** A live-corpus
   `enso-recall` run against the real `memory/` files found two entries silently
   dropping whole daily files from the corpus: a hand-typed lowercase `type: fact`, and a

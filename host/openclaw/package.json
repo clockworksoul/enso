@@ -1,5 +1,5 @@
 {
-  "name": "@clockworksoul/enso-memory-enso",
+  "name": "@clockworksoul/enso-openclaw",
   "version": "0.1.0",
   "private": true,
   "description": "Shadow-mode observer for the Ensō memory system: logs Ensō recall vs flat-file recall divergence without touching the turn. Standalone home in the Ensō repo (lifted from the clockworksoul/openclaw fork, 2026-07-25) so no OpenClaw monorepo fork needs to be maintained just for this extension.",

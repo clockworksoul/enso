@@ -6,16 +6,20 @@ live evidence for whether Ensō should ever take the slot. It is **not** a
 `kind: memory` plugin: it never claims the slot, never modifies a prompt, and
 never writes to the corpus.
 
-**Home:** this directory (`host/memory-enso/` in the Ensō repo), as of
-2026-07-25. Originally built and iterated in a `clockworksoul/openclaw` fork
-(branch `claude/memory-enso-shadow`, path `extensions/memory-enso/`) because
-that's where an OpenClaw plugin-SDK-shaped scaffold was easiest to build
-against. Lifted and shifted here so Ensō doesn't need to maintain an entire
-OpenClaw monorepo fork just to host one extension — the plugin's production
-code only imports from the **published** `openclaw` npm package's public
-`plugin-sdk/*` subpath exports, so it runs standalone with `openclaw` as a
-normal dependency. See "Standalone status" below for the one test-only
-deviation from the original.
+**Home:** this directory (`host/openclaw/` in the Ensō repo — renamed
+2026-07-27 from `host/memory-enso/` once a second host adapter, Codex, was
+confirmed as planned; `host/<host-name>/` is now the standing layout for
+driving adapters). Originally built and iterated in a `clockworksoul/openclaw`
+fork (branch `claude/memory-enso-shadow`, path `extensions/memory-enso/`)
+because that's where an OpenClaw plugin-SDK-shaped scaffold was easiest to
+build against. Lifted and shifted into this repo 2026-07-25 so Ensō doesn't
+need to maintain an entire OpenClaw monorepo fork just to host one extension —
+the plugin's production code only imports from the **published** `openclaw`
+npm package's public `plugin-sdk/*` subpath exports, so it runs standalone
+with `openclaw` as a normal dependency. The plugin's own `id` (`memory-enso`)
+and config key are unchanged by the directory rename — this is a source-tree
+organization change only, invisible at install/runtime. See "Standalone
+status" below for the one test-only deviation from the original.
 
 ## How it works
 
