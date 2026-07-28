@@ -40,3 +40,7 @@ go.work.sum
 
 # Codex memory files
 .learnings
+
+# Python bytecode from host adapter tests
+__pycache__/
+*.pyc

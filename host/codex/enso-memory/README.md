@@ -63,6 +63,27 @@ directory. Records contain session/turn identifiers, cwd, a SHA-256 of the
 prompt, recall mode, latency, result IDs, and scores. Prompt text and recalled
 content are not logged.
 
+## Health status
+
+Alongside the append-only JSONL log, the adapter overwrites a single
+`status.json` in the shadow directory on **every** recall attempt (success or
+failure). Unlike the log, it only ever describes the current state, so an
+external checker reads a few bytes instead of tailing a growing log:
+
+| Field | Meaning |
+| --- | --- |
+| `state` | `ok` after any successful recall; `degraded` after a failure. |
+| `consecutiveErrors` | Failures since the last success (resets to 0 on success). |
+| `lastSuccessAt` | RFC3339 UTC timestamp of the most recent success, or `null`. |
+| `lastErrorAt` | RFC3339 UTC timestamp of the most recent failure, or `null`. |
+| `lastError` | Detail from the most recent failure, or `null`. |
+
+Writes are atomic (temp file + rename) and never throw: a status-file failure
+cannot break a Codex turn, matching the JSONL log's fail-safe contract. `off`
+mode records nothing. This is deliberately not an alerting channel; turning the
+fact into an alert is external-checker work, the same division the JSONL log
+already had.
+
 ## Non-goals
 
 C0 does not capture memories, commit supersessions, update recall strength,

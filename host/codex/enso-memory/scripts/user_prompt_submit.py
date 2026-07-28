@@ -186,6 +186,93 @@ def _log_dir(cfg: dict[str, Any]) -> Path:
     return Path.home() / ".enso" / "hosts" / "codex" / "shadow"
 
 
+STATUS_FILE_NAME = "status.json"
+
+
+def _status_path(cfg: dict[str, Any]) -> Path:
+    return _log_dir(cfg) / STATUS_FILE_NAME
+
+
+def read_status(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Read the current self-reported health status.
+
+    Defaults to a fresh "ok, never observed" state when the file doesn't
+    exist yet (first run) or is unreadable/corrupt — a bad status file must
+    never break the write path below. Mirrors status.ts::readStatus.
+    """
+    default = {
+        "state": "ok",
+        "consecutiveErrors": 0,
+        "lastSuccessAt": None,
+        "lastErrorAt": None,
+        "lastError": None,
+    }
+    try:
+        parsed = json.loads(_status_path(cfg).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return default
+    if not isinstance(parsed, dict):
+        return default
+    consecutive = parsed.get("consecutiveErrors")
+    return {
+        "state": "degraded" if parsed.get("state") == "degraded" else "ok",
+        "consecutiveErrors": consecutive
+        if isinstance(consecutive, int)
+        and not isinstance(consecutive, bool)
+        and consecutive >= 0
+        else 0,
+        "lastSuccessAt": parsed["lastSuccessAt"]
+        if isinstance(parsed.get("lastSuccessAt"), str)
+        else None,
+        "lastErrorAt": parsed["lastErrorAt"]
+        if isinstance(parsed.get("lastErrorAt"), str)
+        else None,
+        "lastError": parsed["lastError"]
+        if isinstance(parsed.get("lastError"), str)
+        else None,
+    }
+
+
+def record_outcome(
+    cfg: dict[str, Any], ts: str, ok: bool, error: str | None = None
+) -> None:
+    """Record one recall outcome, overwriting status.json (not appending).
+
+    Unlike the JSONL log, this file only ever describes the CURRENT state:
+    an external checker reads a few bytes instead of tailing a growing log.
+    Atomic write (temp + rename) so a concurrent reader never sees a
+    half-written file. Never throws — a status-file write failure must not
+    escalate into a broken turn, matching log_record's fail-safe contract.
+    Mirrors status.ts::recordOutcome.
+    """
+    try:
+        prev = read_status(cfg)
+        if ok:
+            nxt = {
+                "state": "ok",
+                "consecutiveErrors": 0,
+                "lastSuccessAt": ts,
+                "lastErrorAt": prev["lastErrorAt"],
+                "lastError": prev["lastError"],
+            }
+        else:
+            nxt = {
+                "state": "degraded",
+                "consecutiveErrors": prev["consecutiveErrors"] + 1,
+                "lastSuccessAt": prev["lastSuccessAt"],
+                "lastErrorAt": ts,
+                "lastError": error if error else "unknown error",
+            }
+        directory = _log_dir(cfg)
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / STATUS_FILE_NAME
+        tmp = directory / f"{STATUS_FILE_NAME}.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(nxt, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError:
+        pass
+
+
 def log_record(cfg: dict[str, Any], event: dict[str, Any], record: dict[str, Any]) -> None:
     now = dt.datetime.now(dt.timezone.utc)
     prompt = str(event.get("prompt", ""))
@@ -217,6 +304,7 @@ def main() -> int:
         event = read_event()
         output = run_recall(cfg, event["prompt"])
         results = output["results"]
+        record_outcome(cfg, dt.datetime.now(dt.timezone.utc).isoformat(), True)
         log_record(
             cfg,
             event,
@@ -251,7 +339,13 @@ def main() -> int:
                     )
                 )
     except Exception as exc:  # failure containment is the adapter's primary promise
-        log_record(cfg, event, {"kind": "enso_error", "error": str(exc)[:500]})
+        detail = str(exc)[:500]
+        # "off" mode is a deliberate no-op, not a health failure, and must not
+        # require configuration — don't record it as a degraded outcome (which
+        # would also create the shadow dir the off-mode test asserts absent).
+        if cfg.get("mode") != "off":
+            record_outcome(cfg, dt.datetime.now(dt.timezone.utc).isoformat(), False, detail)
+        log_record(cfg, event, {"kind": "enso_error", "error": detail})
     return 0
 
 

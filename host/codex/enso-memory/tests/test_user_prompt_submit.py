@@ -148,6 +148,59 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertFalse(self.log_dir.exists())
 
+    def status(self) -> dict:
+        return json.loads((self.log_dir / "status.json").read_text())
+
+    def test_success_records_ok_status(self) -> None:
+        result = self.run_hook(ENSO_RECALL_BIN=str(self.success_binary()))
+        self.assertEqual(result.returncode, 0)
+        status = self.status()
+        self.assertEqual(status["state"], "ok")
+        self.assertEqual(status["consecutiveErrors"], 0)
+        self.assertIsNotNone(status["lastSuccessAt"])
+        self.assertIsNone(status["lastErrorAt"])
+
+    def test_failure_records_degraded_status_with_detail(self) -> None:
+        malformed = self.fake_recall("print('not json')\n")
+        result = self.run_hook(ENSO_RECALL_BIN=str(malformed))
+        self.assertEqual(result.returncode, 0)
+        status = self.status()
+        self.assertEqual(status["state"], "degraded")
+        self.assertEqual(status["consecutiveErrors"], 1)
+        self.assertIsNotNone(status["lastErrorAt"])
+        self.assertIsNotNone(status["lastError"])
+        self.assertIsNone(status["lastSuccessAt"])
+
+    def test_consecutive_failures_accumulate_then_reset_on_success(self) -> None:
+        malformed = self.fake_recall("print('not json')\n")
+        self.run_hook(ENSO_RECALL_BIN=str(malformed))
+        self.run_hook(ENSO_RECALL_BIN=str(malformed))
+        status = self.status()
+        self.assertEqual(status["state"], "degraded")
+        self.assertEqual(status["consecutiveErrors"], 2)
+
+        self.run_hook(ENSO_RECALL_BIN=str(self.success_binary()))
+        status = self.status()
+        self.assertEqual(status["state"], "ok")
+        self.assertEqual(status["consecutiveErrors"], 0)
+        # Historical error context is preserved across a recovery.
+        self.assertIsNotNone(status["lastErrorAt"])
+        self.assertIsNotNone(status["lastSuccessAt"])
+
+    def test_status_file_overwrites_never_grows_to_jsonl(self) -> None:
+        good = self.success_binary()
+        bad = self.fake_recall("print('not json')\n")
+        for i in range(10):
+            self.run_hook(ENSO_RECALL_BIN=str(good if i % 2 == 0 else bad))
+        raw = (self.log_dir / "status.json").read_text()
+        self.assertNotIn("\n", raw)
+        json.loads(raw)  # exactly one JSON object, not JSONL
+
+    def test_off_mode_records_no_status(self) -> None:
+        result = self.run_hook(ENSO_CODEX_MODE="off", ENSO_CORPUS_ROOT="")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((self.log_dir / "status.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
