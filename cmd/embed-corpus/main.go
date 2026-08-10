@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	geminiModel    = "models/gemini-embedding-001"
-	batchEndpoint  = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents"
+	geminiModel    = "models/gemini-embedding-2"
+	batchEndpoint  = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents"
 	maxBatchSize   = 100
 	retryMax       = 4
 	retryBaseDelay = 2 * time.Second

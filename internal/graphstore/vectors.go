@@ -135,12 +135,13 @@ func (m MapEmbedder) Embed(_ context.Context, text string) ([]float64, error) {
 }
 
 // GeminiEmbedder embeds via the Gemini embedContents API — the ADR-002
-// embedding source (gemini-embedding-001, the same model the benchmark
-// baseline uses). stdlib HTTP only; any failure is returned as-is and the
-// caller degrades to lexical recall.
+// embedding source. Originally gemini-embedding-001; that model was
+// retired by Google (HTTP 404 as of 2026-08-10) and replaced with
+// gemini-embedding-2. stdlib HTTP only; any failure is returned as-is and
+// the caller degrades to lexical recall.
 type GeminiEmbedder struct {
 	APIKey string
-	// Model defaults to gemini-embedding-001 when empty.
+	// Model defaults to gemini-embedding-2 when empty.
 	Model string
 	// Client defaults to a 30s-timeout http.Client when nil.
 	Client *http.Client
@@ -150,7 +151,7 @@ func (g GeminiEmbedder) Name() string { return "gemini/" + g.model() }
 
 func (g GeminiEmbedder) model() string {
 	if g.Model == "" {
-		return "gemini-embedding-001"
+		return "gemini-embedding-2"
 	}
 	return g.Model
 }
@@ -163,7 +164,7 @@ func (g GeminiEmbedder) Embed(ctx context.Context, text string) ([]float64, erro
 	if err != nil {
 		return nil, err
 	}
-	url := "https://generativelanguage.googleapis.com/v1beta/models/" + g.model() + ":embedContents"
+	url := "https://generativelanguage.googleapis.com/v1beta/models/" + g.model() + ":embedContent"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
