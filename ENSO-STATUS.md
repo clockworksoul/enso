@@ -1,7 +1,38 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-07-27.*
+*Single source of truth for where we are and what done looks like. Updated 2026-09-24.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## ⚡ 2026-09-24 (Dross Hour) — WP-8 shadow corpus arrived; first analysis changes the picture
+
+The `.enso/shadow/` corpus WP-8 was blocked on **now exists**: 18 days of real
+observation (Jul 25 → Aug 11), 1,261 records, logging stopped when Matt disabled
+the shadow plugin Aug 11. Full analysis: `docs/2026-09-24-wp8-shadow-corpus-first-analysis.md`.
+Three load-bearing findings:
+
+1. **100% of 823 "successful" recalls ran in `degraded` (lexical) mode** — the Gemini
+   embedding endpoint returned HTTP 404 for the *entire* window (the retired
+   `001` model, fixed later in commit `dae4f48`). `vector_ok=0` every day. **The
+   vector pipeline WP-4 gated never fired in shadow.** The corpus validates lexical
+   fallback, NOT the recall quality slot-takeover depends on.
+2. **The corpus is structurally unpairable** — the two hooks share zero keys (0/820∩53
+   turn-hash overlap, 0 exact-text overlap) and `used` is always `"unknown"`. WP-8's
+   core deliverable (label divergent turns) is **not executable** against this
+   instrumentation. This is a WP-7 design flaw surfaced by real data.
+3. **The degradation contract held perfectly** — 0 empty results, p99 3.94s under the
+   4s deadline, never threw into a live turn. This is the one thing the corpus genuinely
+   proves. (Its teeth: the 3-week vector outage was silent — nothing alerted.)
+
+**New, now-unavoidable latency case (RH-2):** measured 2026-09-24, a real `vector`-mode
+recall against the live corpus takes **16–20s wall at ~7% CPU** — the synchronous Gemini
+query-embedding round-trip, 4–5× over the 4s shadow deadline. The moment the (now-fixed)
+vector path is exercised in a fresh window it will time out. WP-7's "no sidecar until a
+latency case is logged" escape hatch now has its case: query-embedding latency.
+
+**WP-8 stays BLOCKED, but the blocker is now specific:** (a) co-key the two hooks +
+fill `used` (WP-7 amendment — the true long pole); (b) address query-embedding latency
+before any fresh vector-mode window; (c) do NOT decide takeover on the current corpus.
+No production code touched this pass; no corpus writes.
 
 ---
 
