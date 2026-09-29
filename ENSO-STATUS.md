@@ -1,7 +1,27 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-09-24.*
+*Single source of truth for where we are and what done looks like. Updated 2026-09-29.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## ⚡ 2026-09-29 (Dross Hour) — WP-7 amendment: the two shadow hooks now co-key on runId
+
+Executed finding #2 of the 2026-09-24 analysis — the "true long pole" for WP-8. The
+shadow corpus was structurally unpairable because the Ensō side keyed on a hash of the
+whole prompt and the flat-file side on a hash of the tool query (0/820∩53 overlap). Both
+OpenClaw hook contexts already expose the same host-authoritative `runId`/`sessionId`
+(verified against the published SDK type defs). Switched the correlation key from a text
+hash to `runId` (→ `sessionId` → legacy text-hash fallback), threaded `ctx` into the
+`after_tool_call` handler (which previously never received it), and added a `turn_src`
+provenance field so an analysis pass can trust a host-id pairing vs discount a legacy
+text record. Also fixed a latent `summarizeToolResult(undefined)` crash. **32/32 vitest
+green (was 26); `tsc --noEmit` clean.** TS host adapter only — no Go core, no corpus
+writes. Full writeup: `docs/2026-09-29-wp7-cokeying-amendment.md`.
+
+**WP-8 still BLOCKED, remaining blockers narrowed to two:** (a) fill `used` from a
+material-use signal — the other half of finding #2, blocked on a host RECALL-DEF event;
+(b) query-embedding latency (finding #3, 16–20s wall, 4–5× over the 4s deadline) before
+any fresh vector-mode window. Co-keying (finding #2a) is now **done**. Do NOT decide slot
+takeover on the current corpus.
 
 ## ⚡ 2026-09-24 (Dross Hour) — WP-8 shadow corpus arrived; first analysis changes the picture
 

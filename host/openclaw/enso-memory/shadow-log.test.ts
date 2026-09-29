@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   appendShadowRecord,
+  correlationKey,
   MAX_LOGGED_TEXT_CHARS,
   truncateText,
   turnKey,
@@ -55,5 +56,39 @@ describe("shadow-log", () => {
     const long = "a".repeat(MAX_LOGGED_TEXT_CHARS * 2);
     expect(truncateText(long)).toHaveLength(MAX_LOGGED_TEXT_CHARS);
     expect(truncateText("short")).toBe("short");
+  });
+});
+
+describe("correlationKey (WP-8 co-keying)", () => {
+  it("prefers runId over both sessionId and the text fallback", () => {
+    const key = correlationKey({ runId: "run-1", sessionId: "sess-1" }, "some prompt");
+    expect(key).toEqual({ turn: "run-1", source: "runId" });
+  });
+
+  it("THE FIX: the two hooks pair when they share a runId but hash different text", () => {
+    // This is exactly the 2026-09 unpairability failure: the Ensō side hashes the
+    // whole prompt, the flat-file side hashes just the tool query. With a shared
+    // runId both now produce the SAME turn key.
+    const ensoSide = correlationKey({ runId: "run-42" }, "long assembled prompt with lots of context");
+    const flatSide = correlationKey({ runId: "run-42" }, "granola");
+    expect(ensoSide.turn).toBe(flatSide.turn);
+    expect(ensoSide.turn).toBe("run-42");
+    // ...whereas the legacy text hashes would NOT have matched.
+    expect(turnKey("long assembled prompt with lots of context")).not.toBe(turnKey("granola"));
+  });
+
+  it("falls back to sessionId when runId is absent", () => {
+    expect(correlationKey({ sessionId: "sess-9" }, "q")).toEqual({
+      turn: "sess-9",
+      source: "sessionId",
+    });
+    expect(correlationKey({ runId: "   ", sessionId: "sess-9" }, "q").source).toBe("sessionId");
+  });
+
+  it("degrades to a text hash when the host supplies no id (legacy, unpairable)", () => {
+    const key = correlationKey(undefined, "q");
+    expect(key.source).toBe("text");
+    expect(key.turn).toBe(turnKey("q"));
+    expect(correlationKey({}, "q").source).toBe("text");
   });
 });

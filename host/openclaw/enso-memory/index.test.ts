@@ -163,6 +163,57 @@ describe("memory-enso plugin entry", () => {
     expect(records[0]?.flatfile?.summary).toContain("found 2 notes");
   });
 
+  it("WP-8 FIX end-to-end: both hooks emit the SAME turn key for the same runId", async () => {
+    // The 2026-09 shadow corpus had 0/820∩53 turn overlap because the two hooks
+    // hashed different strings (prompt vs tool query). With runId threaded from
+    // both hook contexts, an Ensō-side record and a flat-file record from the
+    // same host turn now correlate — the precondition WP-8 divergence labeling
+    // needs. (Ensō side uses a bogus binary so it logs an enso_error record
+    // without a live recall; the turn key is set before the bridge runs.)
+    const shadowLogDir = tmpDir();
+    const { hooks } = registerPlugin({
+      shadowLogDir,
+      ensoBinary: "/nonexistent/enso-recall",
+      corpusRoot: tmpDir(),
+      timeoutMs: 500,
+    });
+    const runId = "run-abc123";
+
+    // Ensō side: whole assembled prompt, keyed on runId from the agent ctx.
+    await hooks.get("before_prompt_build")?.(
+      { prompt: "a long assembled prompt containing the granola question and much more" },
+      { sessionKey: "s1", sessionId: "sess-1", runId },
+    );
+    // Flat-file side: just the tool query, keyed on the SAME runId from tool ctx.
+    await hooks.get("after_tool_call")?.(
+      { toolName: "memory_search", params: { query: "granola" }, durationMs: 5 },
+      { sessionKey: "s1", sessionId: "sess-1", runId },
+    );
+
+    const records = readRecords(shadowLogDir);
+    expect(records).toHaveLength(2);
+    const ensoRec = records.find((r) => r.kind !== "flatfile_result");
+    const flatRec = records.find((r) => r.kind === "flatfile_result");
+    expect(ensoRec?.turn).toBe(runId);
+    expect(flatRec?.turn).toBe(runId);
+    expect(ensoRec?.turn).toBe(flatRec?.turn);
+    expect(ensoRec?.turn_src).toBe("runId");
+    expect(flatRec?.turn_src).toBe("runId");
+  });
+
+  it("after_tool_call falls back to the event runId when the ctx lacks one", async () => {
+    const shadowLogDir = tmpDir();
+    const { hooks } = registerPlugin({ shadowLogDir });
+    await hooks.get("after_tool_call")?.(
+      { toolName: "memory_search", params: { query: "granola" }, runId: "run-from-event" },
+      {},
+    );
+    const records = readRecords(shadowLogDir);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.turn).toBe("run-from-event");
+    expect(records[0]?.turn_src).toBe("runId");
+  });
+
   it("skips empty prompts without spawning or logging", async () => {
     const shadowLogDir = tmpDir();
     const { hooks } = registerPlugin({ shadowLogDir, ensoBinary: "/nonexistent/enso-recall" });

@@ -12,13 +12,31 @@ import path from "node:path";
 /** How much raw query/prompt text a record retains (context for labeling). */
 export const MAX_LOGGED_TEXT_CHARS = 500;
 
+/**
+ * Where the `turn` correlation key came from, so an analysis pass can tell a
+ * host-authoritative pairing (`runId`/`sessionId`, both hooks see the SAME
+ * per-turn id) apart from the legacy text-hash fallback (the two hooks hash
+ * DIFFERENT strings — prompt vs. tool query — so they never coincide). This is
+ * the WP-8 unpairability fix (see docs/2026-09-24-wp8-shadow-corpus-first-analysis.md,
+ * finding #2): the 2026-09 corpus had 0/820∩53 turn overlap precisely because
+ * both sides fell back to `text` hashing with no shared id ever threaded in.
+ */
+export type TurnKeySource = "runId" | "sessionId" | "text";
+
 export type ShadowRecord = {
   /** RFC3339 UTC timestamp of the observation. */
   ts: string;
   /** Which observer wrote this: enso shadow recall or flat-file result. */
   kind: "enso_recall" | "flatfile_result" | "enso_error";
-  /** Correlates records from the same turn: sha256[:16] of the prompt text. */
+  /**
+   * Correlates records from the same turn. Preferred value is the
+   * host-authoritative `runId` (both `before_prompt_build` and `after_tool_call`
+   * see the SAME one), then `sessionId`, degrading to a sha256[:16] hash of the
+   * observed text only when the host supplied no id. `turn_src` records which.
+   */
   turn: string;
+  /** Provenance of `turn`: pairable (runId/sessionId) vs legacy text hash. */
+  turn_src?: TurnKeySource;
   /** Session identity when the host exposed one. */
   session?: string;
   /** Truncated raw text (query/prompt) for human labeling. */
@@ -51,6 +69,41 @@ export type ShadowRecord = {
 
 export function turnKey(promptText: string): string {
   return createHash("sha256").update(promptText).digest("hex").slice(0, 16);
+}
+
+/** Minimal shape shared by both hook contexts that carries per-turn ids. */
+export type TurnIdContext = {
+  runId?: unknown;
+  sessionId?: unknown;
+};
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * The WP-8 co-keying fix. Both `before_prompt_build` (PluginHookAgentContext)
+ * and `after_tool_call` (PluginHookToolContext) expose the SAME host-authoritative
+ * `runId` and `sessionId` for a given turn — so keying both sides on `runId`
+ * makes their records pairable, which text hashing structurally could not do.
+ * Falls back to `sessionId`, then to a hash of `fallbackText`, so a host that
+ * supplies neither id still produces a (legacy, unpairable) record instead of
+ * crashing. Returns the key AND its provenance so analysis can trust or discount
+ * the pairing.
+ */
+export function correlationKey(
+  ctx: TurnIdContext | undefined,
+  fallbackText: string,
+): { turn: string; source: TurnKeySource } {
+  const runId = nonEmptyString(ctx?.runId);
+  if (runId !== undefined) {
+    return { turn: runId, source: "runId" };
+  }
+  const sessionId = nonEmptyString(ctx?.sessionId);
+  if (sessionId !== undefined) {
+    return { turn: sessionId, source: "sessionId" };
+  }
+  return { turn: turnKey(fallbackText), source: "text" };
 }
 
 export function truncateText(s: string): string {

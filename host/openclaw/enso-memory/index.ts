@@ -20,7 +20,13 @@ import { Type } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
 import { resolveMemoryEnsoConfig, type MemoryEnsoConfig } from "./config.js";
 import { runEnsoRecall } from "./enso-bridge.js";
-import { appendShadowRecord, truncateText, turnKey, type ShadowRecord } from "./shadow-log.js";
+import {
+  appendShadowRecord,
+  correlationKey,
+  truncateText,
+  type ShadowRecord,
+  type TurnIdContext,
+} from "./shadow-log.js";
 import { recordOutcome } from "./status.js";
 
 /** Tool names whose results the flat-file observer records for comparison. */
@@ -41,6 +47,12 @@ export function summarizeToolResult(result: unknown): string {
     text = typeof result === "string" ? result : JSON.stringify(result);
   } catch {
     text = "(unserializable tool result)";
+  }
+  // JSON.stringify(undefined) returns undefined (not a string), so guard before
+  // calling string methods -- a memory tool call whose result is undefined must
+  // still log cleanly, not throw into the observer.
+  if (typeof text !== "string") {
+    text = "(no result)";
   }
   return truncateText(text.replace(/\s+/g, " "));
 }
@@ -80,15 +92,20 @@ async function shadowRecall(
   cfg: MemoryEnsoConfig,
   queryText: string,
   session: string | undefined,
+  turnCtx: TurnIdContext | undefined,
 ): Promise<ShadowRecord> {
   const ts = nowISO();
-  const turn = turnKey(queryText);
+  // WP-8 co-keying: prefer the host-authoritative runId (shared with the
+  // after_tool_call side) over a hash of the prompt text, which the flat-file
+  // side can never reproduce.
+  const { turn, source } = correlationKey(turnCtx, queryText);
   const outcome = await runEnsoRecall(cfg, queryText);
   if (!outcome.ok) {
     const record: ShadowRecord = {
       ts,
       kind: "enso_error",
       turn,
+      turn_src: source,
       ...(session !== undefined ? { session } : {}),
       text: truncateText(queryText),
       error: outcome.error,
@@ -102,6 +119,7 @@ async function shadowRecall(
     ts,
     kind: "enso_recall",
     turn,
+    turn_src: source,
     ...(session !== undefined ? { session } : {}),
     text: truncateText(queryText),
     enso: {
@@ -155,8 +173,9 @@ export default definePluginEntry({
         if (prompt.trim() === "") {
           return;
         }
-        const session = asText((ctx as { sessionKey?: unknown } | undefined)?.sessionKey);
-        await shadowRecall(api, cfg, prompt, session === "" ? undefined : session);
+        const agentCtx = ctx as { sessionKey?: unknown } & TurnIdContext | undefined;
+        const session = asText(agentCtx?.sessionKey);
+        await shadowRecall(api, cfg, prompt, session === "" ? undefined : session, agentCtx);
       } catch (error) {
         api.logger.warn(`memory-enso: shadow hook contained failure: ${String(error)}`);
       }
@@ -165,7 +184,7 @@ export default definePluginEntry({
 
     // Shadow side B — what the flat-file path actually returned, captured
     // from the slot owner's tool calls on the same turn.
-    api.on("after_tool_call", async (event: unknown) => {
+    api.on("after_tool_call", async (event: unknown, ctx: unknown) => {
       try {
         const ev = (event ?? {}) as {
           toolName?: unknown;
@@ -173,16 +192,27 @@ export default definePluginEntry({
           result?: unknown;
           durationMs?: unknown;
           isError?: unknown;
+          runId?: unknown;
         };
         const toolName = asText(ev.toolName);
         if (!OBSERVED_MEMORY_TOOLS.has(toolName)) {
           return;
         }
         const query = asText((ev.params as { query?: unknown } | undefined)?.query);
+        // WP-8 co-keying: the tool context carries the SAME runId as the
+        // before_prompt_build side; the after_tool_call EVENT also carries runId
+        // as a fallback. Prefer the context, then the event, then text hashing.
+        const toolCtx = (ctx ?? {}) as TurnIdContext & { sessionKey?: unknown };
+        const idCtx: TurnIdContext = {
+          runId: toolCtx.runId ?? ev.runId,
+          sessionId: toolCtx.sessionId,
+        };
+        const { turn, source } = correlationKey(idCtx, query);
         safeAppend(api, cfg, {
           ts: nowISO(),
           kind: "flatfile_result",
-          turn: turnKey(query),
+          turn,
+          turn_src: source,
           ...(query !== "" ? { text: truncateText(query) } : {}),
           flatfile: {
             tool: toolName,
@@ -215,7 +245,7 @@ export default definePluginEntry({
             details: { count: 0, error: "query is required" },
           };
         }
-        const record = await shadowRecall(api, cfg, query, undefined);
+        const record = await shadowRecall(api, cfg, query, undefined, undefined);
         if (record.kind === "enso_error") {
           return {
             content: [

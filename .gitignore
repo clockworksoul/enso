@@ -20,6 +20,10 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Node dependency directories (host adapters are npm packages). Global rule so a
+# node_modules at any host/adapter level is ignored, not just the per-package one.
+node_modules/
+
 # Go workspace file
 go.work
 go.work.sum
