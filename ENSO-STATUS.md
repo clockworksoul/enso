@@ -1,7 +1,34 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-09-29.*
+*Single source of truth for where we are and what done looks like. Updated 2026-09-30.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## ⚡ 2026-09-30 (Dross Hour) — WP-8 blocker (b) solved in principle: the latency case was misdiagnosed
+
+Attacked blocker (b), the "query-embedding latency (16-20s, 4-5x over the 4s deadline)."
+**Reproduced the 20s wall — but it is NOT the query embed.** It is `enso-recall`
+re-embedding the whole corpus on every call: the binary rebuilds a fresh in-memory graph
+(`dbPath=""`) with the embedder attached, and append embeds one entry per sequential
+Gemini call (`graphstore.go:271`). Phase-timed proof: `rebuild+embed` = **19,274 ms**
+(68 entries × ~275ms), the `recall` step incl. the single query embed = **320 ms**, a
+direct query embed = **0.38s**, same rebuild embedder-OFF = **51 ms**. The Sep-24
+diagnosis ("almost entirely the synchronous query-embedding round-trip") reasoned from
+~7% CPU to the wrong culprit — a shared-premise/stale-assumption trap, the exact class
+Ensō exists to catch.
+
+**Fix measured, not just proposed:** a persisted on-disk KùzuDB index (embeddings already
+live there as node properties per WP-4) makes a **warm vector recall 461 ms total** (43.7ms
+open + 417ms recall) — **~40x speedup, ~9x under the 4s deadline.** Recommendation, in
+order: (1) persist the index in `enso-recall` + rebuild only on corpus-newer-than-index;
+(2) batch the append-time embeds (`cmd/embed-corpus` already uses `batchEmbedContents`
+100/call; the append loop does not) to make cold builds ~1-2s; (3) keep the sidecar
+deferred — #1 answers the RH-2 case with a boring one-shot binary. **This reverses the
+Sep-24 conclusion that a fresh vector window "will be all timeouts":** it won't, once the
+index is reused. **No production code changed, no corpus writes, no fix committed** — the
+fix touches the WP-7 bridge and the `Embedder` interface (batch method), so it's its own
+reviewed change, not a diagnosis-pass slip-in. Blocker (a) (fill `used` from a host
+RECALL-DEF event) remains the true long pole. Full writeup:
+`docs/2026-09-30-wp8-latency-rootcause-corpus-reembed.md`.
 
 ## ⚡ 2026-09-29 (Dross Hour) — WP-7 amendment: the two shadow hooks now co-key on runId
 
