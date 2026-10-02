@@ -1,7 +1,39 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-09-30.*
+*Single source of truth for where we are and what done looks like. Updated 2026-10-01.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## ⚡ 2026-10-01 (Dross Hour) — WP-8 blocker (b) SHIPPED: `enso-recall` persists its index
+
+Executed the fix the last three passes converged on (Sep-30 measured it, stopped at the
+seam). `cmd/enso-recall` now keeps an on-disk KùzuDB index at `<root>/.enso/index.kuzu`.
+**Warm path** (index present, no `memory/*.md` newer than it): `Open` the persisted graph
+and attach the embedder ONLY for the single query embed — no `Append`, so the corpus is
+never re-embedded; stored embeddings (WP-4 node properties) are read back. **Cold path**
+(absent/stale/`-rebuild`/`-index -`): rebuild the on-disk index from Markdown, embedding at
+append time, then recall.
+
+**Live proof** (live corpus, 68 entries, vector mode, throwaway index): COLD
+**19.4s** (`index_built=true`) → WARM **0.79s / 764ms** (`index_built=false`), **identical
+results** — ~25x faster, ~5x under the 4s shadow deadline, still full `vector` mode.
+Reverses the Sep-24 "fresh vector window will be all timeouts."
+
+**No schema bump, deployed bridge gets it for free:** two ADDITIVE JSON fields
+(`index_path`, `index_built`), version stays 1 (the bridge reads only known fields). The
+bridge invokes `enso-recall` with no `-index`, so the default path activates automatically
+— zero bridge change. **Staleness guard** = index mtime `>=` newest `memory/` file mtime;
+fails safe toward rebuilding (a wrong "fresh" verdict degrades to slightly-stale recall,
+never corruption — INV-1). **Corpus never written** (index under `.enso/`, derived cache).
+**No `internal/core`/`mdstore`/`graphstore` change** — the fix is entirely in the WP-7
+bridge binary. **`make check` + `-race` green**; 5 new tests pin cold→warm, stale-rebuild,
+corpus-untouched, force-rebuild, and in-memory opt-out. Full writeup:
+`docs/2026-10-01-wp8-persisted-index-latency-fix.md`.
+
+**WP-8 still BLOCKED on the one remaining long pole — blocker (a):** fill `used` from a
+host material-use (RECALL-DEF) signal the host does not emit yet (co-keying done Sep 29).
+Blocker (b) latency is now DONE. Option 2 (batch the cold-path append embeds via an
+`Embedder.BatchEmbed` method, to shrink the one-time ~19s cold build) is deferred to its
+own review — it touches the interface and the warm path already answers the RH-2 case.
 
 ## ⚡ 2026-09-30 (Dross Hour) — WP-8 blocker (b) solved in principle: the latency case was misdiagnosed
 

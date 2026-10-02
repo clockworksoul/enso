@@ -72,13 +72,20 @@ func hashTree(t *testing.T, root string) map[string][32]byte {
 }
 
 func runToJSON(t *testing.T, root, query string) outputJSON {
+	return runCfgToJSON(t, runConfig{root: root, query: query, k: 10, nowFlag: "2026-07-10T12:00:00Z"})
+}
+
+func runCfgToJSON(t *testing.T, cfg runConfig) outputJSON {
 	t.Helper()
+	if cfg.k == 0 {
+		cfg.k = 10
+	}
 	f, err := os.CreateTemp(t.TempDir(), "out-*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := run(root, query, 10, "2026-07-10T12:00:00Z", f); err != nil {
+	if err := run(cfg, f); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	b, err := os.ReadFile(f.Name())
@@ -137,16 +144,21 @@ func TestRecallEmptyQueryRecentMode(t *testing.T) {
 	}
 }
 
-// TestRecallIsReadOnly is the WP-7 DoD box: any invocation leaves the corpus
-// byte-identical. Shadow mode observes; it never touches.
+// TestRecallIsReadOnly is the WP-7 DoD box: any invocation leaves the CORPUS
+// byte-identical. Shadow mode observes; it never touches the canonical memory/
+// substrate. The derived index under <root>/.enso/ is cache, not corpus, and is
+// expected to appear/update — it is explicitly excluded here (and the corpus-
+// untouched guarantee on the persisted path is pinned by
+// TestPersistedIndexLeavesCorpusUntouched).
 func TestRecallIsReadOnly(t *testing.T) {
 	root := seedCorpus(t)
-	before := hashTree(t, root)
+	corpus := filepath.Join(root, "memory")
+	before := hashTree(t, corpus)
 
 	_ = runToJSON(t, root, "what happened with granola?")
 	_ = runToJSON(t, root, "") // recent mode too
 
-	after := hashTree(t, root)
+	after := hashTree(t, corpus)
 	if len(before) != len(after) {
 		t.Fatalf("file count changed: %d -> %d", len(before), len(after))
 	}
@@ -164,7 +176,131 @@ func TestRecallMissingRootIsLoud(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := run("", "q", 10, "", f); err == nil {
+	if err := run(runConfig{root: "", query: "q", k: 10}, f); err == nil {
 		t.Fatal("want error for missing -root")
+	}
+}
+
+// TestPersistedIndexColdThenWarm is the WP-8 blocker (b) fix contract: the
+// first call builds the on-disk index (index_built=true), and a second call
+// against the unchanged corpus reuses it (index_built=false) while returning
+// identical results. This is what makes a warm vector recall ~40x cheaper than
+// re-embedding the corpus every call.
+func TestPersistedIndexColdThenWarm(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "") // pin the lexical path; no network in unit tests
+	root := seedCorpus(t)
+	q := "what happened with granola?"
+
+	cold := runToJSON(t, root, q)
+	if !cold.IndexBuilt {
+		t.Fatalf("first call must build the index (index_built=true), got false")
+	}
+	if cold.IndexPath == "" {
+		t.Fatal("index_path must be reported on the persisted path")
+	}
+	if _, err := os.Stat(cold.IndexPath); err != nil {
+		t.Fatalf("index not persisted at %s: %v", cold.IndexPath, err)
+	}
+
+	warm := runToJSON(t, root, q)
+	if warm.IndexBuilt {
+		t.Fatalf("second call must reuse the index (index_built=false), got true")
+	}
+	if len(warm.Results) != len(cold.Results) || warm.Results[0].ID != cold.Results[0].ID {
+		t.Fatalf("warm recall diverged from cold: cold top %q, warm top %q",
+			firstID(cold), firstID(warm))
+	}
+	if warm.CorpusEntries != cold.CorpusEntries {
+		t.Fatalf("corpus_entries changed across warm reuse: %d -> %d", cold.CorpusEntries, warm.CorpusEntries)
+	}
+}
+
+func firstID(o outputJSON) string {
+	if len(o.Results) == 0 {
+		return "<none>"
+	}
+	return o.Results[0].ID
+}
+
+// TestPersistedIndexStaleTriggersRebuild: touching a memory file newer than the
+// index must force a cold rebuild on the next call. The staleness guard fails
+// SAFE toward rebuilding, never toward serving a stale index.
+func TestPersistedIndexStaleTriggersRebuild(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	root := seedCorpus(t)
+	q := "what happened with granola?"
+
+	_ = runToJSON(t, root, q) // cold build
+	if warm := runToJSON(t, root, q); warm.IndexBuilt {
+		t.Fatal("expected warm reuse before touching the corpus")
+	}
+
+	// Make a corpus file newer than the index.
+	future := time.Now().Add(2 * time.Hour)
+	memDir := filepath.Join(root, "memory")
+	ents, err := os.ReadDir(memDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) == 0 {
+		t.Fatal("seed corpus wrote no memory files")
+	}
+	touched := filepath.Join(memDir, ents[0].Name())
+	if err := os.Chtimes(touched, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	if rebuilt := runToJSON(t, root, q); !rebuilt.IndexBuilt {
+		t.Fatal("a corpus file newer than the index must trigger a cold rebuild")
+	}
+}
+
+// TestPersistedIndexLeavesCorpusUntouched extends the read-only guarantee to
+// the persisted path: building and reusing the index writes only under
+// <root>/.enso/, never into memory/.
+func TestPersistedIndexLeavesCorpusUntouched(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	root := seedCorpus(t)
+	memBefore := hashTree(t, filepath.Join(root, "memory"))
+
+	_ = runToJSON(t, root, "granola") // cold build
+	_ = runToJSON(t, root, "granola") // warm reuse
+
+	memAfter := hashTree(t, filepath.Join(root, "memory"))
+	if len(memBefore) != len(memAfter) {
+		t.Fatalf("memory/ file count changed: %d -> %d", len(memBefore), len(memAfter))
+	}
+	for path, h := range memBefore {
+		if memAfter[path] != h {
+			t.Fatalf("persisted index path modified a corpus file: %s", path)
+		}
+	}
+}
+
+// TestForceRebuildFlag: -rebuild rebuilds even when the index is fresh.
+func TestForceRebuildFlag(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	root := seedCorpus(t)
+	_ = runToJSON(t, root, "granola") // cold build
+	forced := runCfgToJSON(t, runConfig{root: root, query: "granola", k: 10, nowFlag: "2026-07-10T12:00:00Z", rebuild: true})
+	if !forced.IndexBuilt {
+		t.Fatal("-rebuild must force a cold rebuild even on a fresh index")
+	}
+}
+
+// TestInMemoryIndexOptOut: -index "-" keeps the old fresh-in-memory behavior
+// (no persisted path, always rebuilt, no index file written).
+func TestInMemoryIndexOptOut(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	root := seedCorpus(t)
+	o := runCfgToJSON(t, runConfig{root: root, query: "granola", k: 10, nowFlag: "2026-07-10T12:00:00Z", index: "-"})
+	if o.IndexPath != "" {
+		t.Fatalf("in-memory opt-out must report empty index_path, got %q", o.IndexPath)
+	}
+	if !o.IndexBuilt {
+		t.Fatal("in-memory mode always rebuilds (index_built=true)")
+	}
+	if _, err := os.Stat(filepath.Join(root, defaultIndexRelPath)); !os.IsNotExist(err) {
+		t.Fatalf("in-memory mode must not write the default index file (stat err=%v)", err)
 	}
 }
