@@ -1,7 +1,53 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-10-01.*
+*Single source of truth for where we are and what done looks like. Updated 2026-10-02.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## ⚡ 2026-10-02 (Dross Hour) — WP-8 blocker (a) SHIPPED: the `used` RECALL-DEF signal, derived from `llm_output`
+
+Filled the last long pole. The `used` field was `"unknown"` on every record
+since WP-7 because nothing told the corpus whether a recalled memory was
+**materially used** in the reply — without which the slot-takeover gate's second
+half (did Ensō surface the memory the turn *needed*?) is unscoreable.
+
+**The "host doesn't emit a material-use event" assumption was half-stale.** Checked
+the published SDK type defs: there is no purpose-built "memory X used" event, but
+**`llm_output` (`PluginHookLlmOutputEvent`) carries `assistantTexts` keyed on the
+same host `runId`** the 2026-09-29 amendment already co-keys the recall hooks on.
+(`message_sent` carries the reply too but the SDK documents `runId` is NOT plumbed
+through the outbound path there — only `sessionKey`, which can't disambiguate
+concurrent turns. `llm_output` is the agent-runtime hook where `runId` IS
+populated.) So material use is **derivable, not absent.**
+
+**What shipped (host adapter only — no Go/core/mdstore/graphstore change, no corpus
+writes):** (1) `material-use.ts`, a deterministic precision-gated matcher —
+`yes` only on a run of **≥3 consecutive distinctive tokens** shared in order
+between the recalled memory and the reply (stop words + `mem/type/fact/decision`
+id-vocabulary stripped first); a single shared topic word is NOT a match. (2) A
+bounded in-memory recall→reply bridge: `before_prompt_build` stashes recalled
+`{id,content}` by `runId` (256-turn cap, oldest-evicted, content never persisted).
+(3) An `llm_output` observer that scores each stashed memory against the reply and
+writes one new **`reply_use`** record (per-id verdicts + aggregate `used`), then
+evicts. `used` widened `"unknown"`→`"unknown"|"yes"|"no"`; recall/flatfile stay
+`"unknown"` (written before the reply) and join to `reply_use` on `turn`. Additive,
+append-only — no written line is mutated.
+
+**Precision over recall, by design (stop at the seam):** this CAPTURES and LABELS
+the signal with a reviewable `score`+`evidence` trail; it does NOT decide takeover.
+Paraphrase reuse without a distinctive 3-token run scores `no` (safe direction).
+No semantic match (would reintroduce the embed latency this path avoids, and trade
+auditability for recall) until a real case shows the lexical matcher missing at a
+rate that changes the verdict.
+
+**WP-8 still BLOCKED — but no longer on an unobtainable signal.** Both of blocker
+(a)'s named sub-parts (co-key the hooks · fill `used`) are now DONE; blocker (b)
+latency shipped Oct-1. What remains is purely **collect a fresh shadow window**
+with (co-keying + this label + the fixed vector path + the Oct-1 persisted index)
+running long enough to label divergent turns, then a human reads the labeled
+corpus and decides takeover. Validated against the real SDK shape, not yet prod
+data (the Jul-25→Aug-11 window predates all of this and ran degraded-lexical).
+`vitest` 49/49, `tsc` clean, `make check`+`-race` green, drift IN SYNC. Full
+writeup: `docs/2026-10-02-wp8-blocker-a-material-use-signal.md`.
 
 ## ⚡ 2026-10-01 (Dross Hour) — WP-8 blocker (b) SHIPPED: `enso-recall` persists its index
 

@@ -98,10 +98,11 @@ function readStatusFile(shadowLogDir: string): unknown {
 }
 
 describe("memory-enso plugin entry", () => {
-  it("registers both observation hooks and the manual tool", () => {
+  it("registers both observation hooks, the reply-use observer, and the manual tool", () => {
     const { hooks, tools } = registerPlugin({ shadowLogDir: tmpDir() });
     expect(hooks.has("before_prompt_build")).toBe(true);
     expect(hooks.has("after_tool_call")).toBe(true);
+    expect(hooks.has("llm_output")).toBe(true);
     expect(tools).toHaveLength(1);
     expect(tools[0]?.().name).toBe("enso_recall");
   });
@@ -232,6 +233,118 @@ describe("memory-enso plugin entry", () => {
       content: Array<{ text: string }>;
     };
     expect(result.content[0]?.text).toContain("unavailable");
+  });
+});
+
+describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)", () => {
+  // A fake enso-recall binary that returns two results whose `content` fields
+  // are controllable, so the material-use matcher has real text to score
+  // without a live Go build. Written to a temp dir and marked executable.
+  function fakeBridge(results: Array<{ id: string; content: string }>): string {
+    const dir = tmpDir();
+    const bin = path.join(dir, "enso-recall");
+    const payload = {
+      version: 1,
+      query: "",
+      as_of: "",
+      mode: "lexical",
+      degraded: "",
+      elapsed_ms: 1,
+      corpus_entries: results.length,
+      results: results.map((r) => ({
+        id: r.id,
+        type: "fact",
+        content: r.content,
+        specificity: 0.5,
+        strength: 0.5,
+      })),
+    };
+    fs.writeFileSync(
+      bin,
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(payload))});\n`,
+      { mode: 0o755 },
+    );
+    return bin;
+  }
+
+  async function runTurn(
+    hooks: Map<string, HookHandler>,
+    runId: string,
+    prompt: string,
+    assistantTexts: string[],
+  ) {
+    await hooks.get("before_prompt_build")?.({ prompt }, { sessionKey: "s1", runId });
+    await hooks.get("llm_output")?.({ runId, sessionId: "sess-1", assistantTexts }, {});
+  }
+
+  it("END TO END: labels a materially-used memory yes and an unused one no", async () => {
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([
+      { id: "mem:2026-09-20-omega", content: "Omega livetopology aggregate rewrite shipped" },
+      { id: "mem:2026-03-20-owen", content: "Owen birthday is March twentieth" },
+    ]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, corpusRoot: tmpDir() });
+
+    await runTurn(
+      hooks,
+      "run-1",
+      "what happened with omega livetopology?",
+      ["The omega livetopology aggregate rewrite is done and stacked on your branch."],
+    );
+
+    const replyUse = readRecords(shadowLogDir).find((r) => r.kind === "reply_use");
+    expect(replyUse).toBeDefined();
+    expect(replyUse?.turn).toBe("run-1");
+    expect(replyUse?.turn_src).toBe("runId");
+    expect(replyUse?.used).toBe("yes"); // at least one memory was used
+    const byId = Object.fromEntries((replyUse?.reply_use ?? []).map((v) => [v.id, v]));
+    expect(byId["mem:2026-09-20-omega"]?.used).toBe("yes");
+    expect(byId["mem:2026-09-20-omega"]?.evidence).toContain("livetopology");
+    expect(byId["mem:2026-03-20-owen"]?.used).toBe("no"); // never mentioned in the reply
+  });
+
+  it("labels used=no when the reply drew on none of the recalled memories", async () => {
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([
+      { id: "mem:x", content: "Omega livetopology aggregate rewrite shipped" },
+    ]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, corpusRoot: tmpDir() });
+    await runTurn(hooks, "run-2", "unrelated question", ["Sure, the weather looks clear today."]);
+    const replyUse = readRecords(shadowLogDir).find((r) => r.kind === "reply_use");
+    expect(replyUse?.used).toBe("no");
+    expect(replyUse?.reply_use?.[0]?.used).toBe("no");
+  });
+
+  it("writes no reply_use record when the turn recalled nothing for that runId", async () => {
+    const shadowLogDir = tmpDir();
+    const { hooks } = registerPlugin({ shadowLogDir });
+    // llm_output fires for a runId that never went through before_prompt_build.
+    await hooks.get("llm_output")?.(
+      { runId: "orphan-run", sessionId: "sess-1", assistantTexts: ["hi"] },
+      {},
+    );
+    expect(readRecords(shadowLogDir).some((r) => r.kind === "reply_use")).toBe(false);
+  });
+
+  it("consumes the pending turn so a duplicate llm_output does not double-label", async () => {
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([{ id: "mem:x", content: "omega livetopology aggregate" }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, corpusRoot: tmpDir() });
+    await runTurn(hooks, "run-3", "q", ["omega livetopology aggregate confirmed"]);
+    // second llm_output for the same runId: nothing left to label.
+    await hooks.get("llm_output")?.(
+      { runId: "run-3", sessionId: "sess-1", assistantTexts: ["omega livetopology aggregate"] },
+      {},
+    );
+    expect(readRecords(shadowLogDir).filter((r) => r.kind === "reply_use")).toHaveLength(1);
+  });
+
+  it("swallows a malformed llm_output event (observation-only, never throws)", async () => {
+    const shadowLogDir = tmpDir();
+    const { hooks } = registerPlugin({ shadowLogDir });
+    const returned = await hooks.get("llm_output")?.(undefined, {});
+    expect(returned).toBeUndefined();
+    expect(readRecords(shadowLogDir).some((r) => r.kind === "reply_use")).toBe(false);
   });
 });
 

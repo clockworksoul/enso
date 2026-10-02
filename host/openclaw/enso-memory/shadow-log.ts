@@ -23,11 +23,25 @@ export const MAX_LOGGED_TEXT_CHARS = 500;
  */
 export type TurnKeySource = "runId" | "sessionId" | "text";
 
+/**
+ * Per-memory material-use verdict for a `reply_use` record. One entry per id
+ * Ensō surfaced on this turn, labeling whether its content was materially used
+ * in the assistant's actual reply. See material-use.ts for the matcher.
+ */
+export type ReplyUseVerdict = {
+  id: string;
+  used: "yes" | "no";
+  /** Longest distinctive shared-token run length (0 for "no"). */
+  score: number;
+  /** The matched token run, for human labeling (empty for "no"). */
+  evidence?: string;
+};
+
 export type ShadowRecord = {
   /** RFC3339 UTC timestamp of the observation. */
   ts: string;
-  /** Which observer wrote this: enso shadow recall or flat-file result. */
-  kind: "enso_recall" | "flatfile_result" | "enso_error";
+  /** Which observer wrote this: enso shadow recall, flat-file result, reply-use label, or error. */
+  kind: "enso_recall" | "flatfile_result" | "enso_error" | "reply_use";
   /**
    * Correlates records from the same turn. Preferred value is the
    * host-authoritative `runId` (both `before_prompt_build` and `after_tool_call`
@@ -60,11 +74,20 @@ export type ShadowRecord = {
   /** Bridge/observer failure detail for kind == enso_error. */
   error?: string;
   /**
-   * RECALL-DEF placeholder: whether the surfaced memory was materially used.
-   * Always "unknown" in WP-7 — materially-used detection is out of scope and
-   * the field exists so the log format does not change when it arrives.
+   * Reply-use side (kind == reply_use): per-id material-use verdicts for the
+   * memories Ensō surfaced on this turn, derived from the `llm_output` reply
+   * text. Present only on reply_use records. See material-use.ts.
    */
-  used: "unknown";
+  reply_use?: ReplyUseVerdict[];
+  /**
+   * RECALL-DEF signal: whether a surfaced memory was materially used in the
+   * reply. WP-7 wrote "unknown" everywhere (no reply-text seam yet). WP-8
+   * blocker (a) adds the `reply_use` record kind, whose aggregate verdict is
+   * "yes" if ANY surfaced id matched, else "no"; recall/flatfile records stay
+   * "unknown" (they are written before the reply exists) and are joined to the
+   * reply_use record on `turn` (runId) by the analysis pass.
+   */
+  used: "unknown" | "yes" | "no";
 };
 
 export function turnKey(promptText: string): string {

@@ -24,10 +24,45 @@ import {
   appendShadowRecord,
   correlationKey,
   truncateText,
+  type ReplyUseVerdict,
   type ShadowRecord,
   type TurnIdContext,
 } from "./shadow-log.js";
+import { assessMaterialUse } from "./material-use.js";
 import { recordOutcome } from "./status.js";
+
+/**
+ * WP-8 blocker (a): bounded in-memory bridge from recall time to reply time.
+ *
+ * `before_prompt_build` recalls memories but the reply does not exist yet; the
+ * `llm_output` hook has the reply but not the recalled memory CONTENT (the
+ * persistent log stores only ids+scores, to stay bounded and content-free).
+ * So at recall time we stash the full recalled content keyed by the turn's
+ * runId, and at `llm_output` time we consume it to score material use, then
+ * evict. This keeps memory content out of the JSONL while still deriving the
+ * RECALL-DEF label. The map is bounded and evicts oldest-first so a turn that
+ * never reaches `llm_output` (error, cancel) cannot leak unboundedly.
+ */
+type PendingRecall = { at: number; memories: Array<{ id: string; content: string }> };
+const MAX_PENDING_TURNS = 256;
+
+function rememberRecall(
+  pending: Map<string, PendingRecall>,
+  turn: string,
+  memories: Array<{ id: string; content: string }>,
+): void {
+  if (memories.length === 0) {
+    return;
+  }
+  pending.set(turn, { at: Date.now(), memories });
+  while (pending.size > MAX_PENDING_TURNS) {
+    const oldest = pending.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    pending.delete(oldest);
+  }
+}
 
 /** Tool names whose results the flat-file observer records for comparison. */
 const OBSERVED_MEMORY_TOOLS = new Set(["memory_search", "memory_recall", "memory_get"]);
@@ -93,6 +128,7 @@ async function shadowRecall(
   queryText: string,
   session: string | undefined,
   turnCtx: TurnIdContext | undefined,
+  pending?: Map<string, PendingRecall>,
 ): Promise<ShadowRecord> {
   const ts = nowISO();
   // WP-8 co-keying: prefer the host-authoritative runId (shared with the
@@ -138,7 +174,68 @@ async function shadowRecall(
   };
   safeAppend(api, cfg, record);
   safeRecordOutcome(api, cfg, ts, true);
+  // WP-8 blocker (a): stash recalled content keyed by the turn so the
+  // llm_output observer can score material use. Only pairable (runId/sessionId)
+  // turns are worth stashing — a text-hashed key cannot be reproduced by the
+  // llm_output side, which hashes nothing.
+  if (pending !== undefined && source !== "text") {
+    rememberRecall(
+      pending,
+      turn,
+      outcome.output.results.map((r) => ({ id: r.id, content: r.content })),
+    );
+  }
   return record;
+}
+
+/**
+ * WP-8 blocker (a): the RECALL-DEF observer. Fires on `llm_output` — the one
+ * hook that carries BOTH the host-authoritative runId (co-key with the recall
+ * side) AND the assistant's actual reply text. Looks up the memories Ensō
+ * recalled on this runId, scores each against the reply, and writes a single
+ * `reply_use` record labeling material use. Observation-only and fail-safe:
+ * any failure is swallowed so a broken label never touches the turn.
+ */
+function observeReplyUse(
+  api: OpenClawPluginApi,
+  cfg: MemoryEnsoConfig,
+  pending: Map<string, PendingRecall>,
+  event: unknown,
+): void {
+  const ev = (event ?? {}) as { runId?: unknown; sessionId?: unknown; assistantTexts?: unknown };
+  const runId = typeof ev.runId === "string" && ev.runId.trim() !== "" ? ev.runId : undefined;
+  const sessionId =
+    typeof ev.sessionId === "string" && ev.sessionId.trim() !== "" ? ev.sessionId : undefined;
+  const turn = runId ?? sessionId;
+  if (turn === undefined) {
+    return;
+  }
+  const recalled = pending.get(turn);
+  if (recalled === undefined) {
+    return; // Ensō surfaced nothing on this turn (or it was a text-hashed key).
+  }
+  pending.delete(turn); // one reply per turn; consume so the map stays bounded.
+  const replyText = Array.isArray(ev.assistantTexts)
+    ? ev.assistantTexts.filter((t): t is string => typeof t === "string").join("\n")
+    : "";
+  const verdicts: ReplyUseVerdict[] = recalled.memories.map((m) => {
+    const v = assessMaterialUse(m.content, replyText);
+    return {
+      id: m.id,
+      used: v.used,
+      score: v.score,
+      ...(v.evidence !== "" ? { evidence: v.evidence } : {}),
+    };
+  });
+  const anyUsed = verdicts.some((v) => v.used === "yes");
+  safeAppend(api, cfg, {
+    ts: nowISO(),
+    kind: "reply_use",
+    turn,
+    turn_src: runId !== undefined ? "runId" : "sessionId",
+    reply_use: verdicts,
+    used: anyUsed ? "yes" : "no",
+  });
 }
 
 export default definePluginEntry({
@@ -164,6 +261,10 @@ export default definePluginEntry({
       `memory-enso: shadow observation on (corpus: ${cfg.corpusRoot}, log: ${cfg.shadowLogDir})`,
     );
 
+    // WP-8 blocker (a): per-turn bridge from recall (before_prompt_build) to
+    // reply (llm_output). Keyed by the host runId both hooks share.
+    const pendingRecalls = new Map<string, PendingRecall>();
+
     // Shadow side A — Ensō's answer for the same turn the slot owner serves.
     // Observation-only: the handler NEVER returns a value, so the host cannot
     // interpret it as a prompt modification.
@@ -175,7 +276,14 @@ export default definePluginEntry({
         }
         const agentCtx = ctx as { sessionKey?: unknown } & TurnIdContext | undefined;
         const session = asText(agentCtx?.sessionKey);
-        await shadowRecall(api, cfg, prompt, session === "" ? undefined : session, agentCtx);
+        await shadowRecall(
+          api,
+          cfg,
+          prompt,
+          session === "" ? undefined : session,
+          agentCtx,
+          pendingRecalls,
+        );
       } catch (error) {
         api.logger.warn(`memory-enso: shadow hook contained failure: ${String(error)}`);
       }
@@ -224,6 +332,18 @@ export default definePluginEntry({
         });
       } catch (error) {
         api.logger.warn(`memory-enso: tool observer contained failure: ${String(error)}`);
+      }
+    });
+
+    // Shadow side C (WP-8 blocker a) — the RECALL-DEF label. llm_output is the
+    // only hook carrying both the populated runId (co-key with side A) and the
+    // assistant's reply text, so material use is derived here, never earlier.
+    // Observation-only: no return value, failures swallowed.
+    api.on("llm_output", async (event: unknown) => {
+      try {
+        observeReplyUse(api, cfg, pendingRecalls, event);
+      } catch (error) {
+        api.logger.warn(`memory-enso: reply-use observer contained failure: ${String(error)}`);
       }
     });
 
