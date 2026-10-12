@@ -13,6 +13,14 @@
 //	  -tags "granola,tooling" \
 //	  -confidence high
 //
+// # Backdated append
+//
+//	enso-append \
+//	  -root ~/.openclaw/workspace \
+//	  -type Fact \
+//	  -content "Historical fact" \
+//	  -encoded-time 2026-02-15T12:00:00Z
+//
 // # Supersession (closes an existing entry and creates a new one)
 //
 //	enso-append \
@@ -24,8 +32,9 @@
 //	  -confidence high
 //
 // The entry ID is auto-generated from today's date and a slug of the content.
-// EncodedTime is set to UTC now. All reserved Phase-3 fields are written with
-// sane defaults (marked TUNABLE; inert until Phase 3).
+// EncodedTime defaults to UTC now and can be overridden with -encoded-time. All
+// reserved Phase-3 fields are written with sane defaults (marked TUNABLE; inert
+// until Phase 3).
 package main
 
 import (
@@ -50,6 +59,7 @@ func main() {
 	about := flag.String("about", "", "comma-separated entity refs, e.g. project:omega (optional)")
 	confidence := flag.String("confidence", "high", "confidence: high|medium|low")
 	eventTime := flag.String("event-time", "", "ISO-8601 event time (when it became true; optional)")
+	encodedTime := flag.String("encoded-time", "", "ISO-8601 encoded time (when it was encoded; optional, defaults to now)")
 	supersede := flag.String("supersede", "", "ID of the entry this new one supersedes (triggers supersession ceremony)")
 	dryRun := flag.Bool("dry-run", false, "print the formatted block(s) without writing")
 	flag.Parse()
@@ -65,6 +75,14 @@ func main() {
 	}
 
 	now := time.Now().UTC()
+	encodedAt := now
+	if *encodedTime != "" {
+		t, err := time.Parse(time.RFC3339, *encodedTime)
+		if err != nil {
+			log.Fatalf("enso-append: -encoded-time: %v", err)
+		}
+		encodedAt = t
+	}
 
 	slugSrc := *content
 	if *slug != "" {
@@ -79,7 +97,7 @@ func main() {
 		ID:          id,
 		Type:        core.NodeType(*entryType),
 		Content:     *content,
-		EncodedTime: now,
+		EncodedTime: encodedAt,
 		Confidence:  core.Confidence(*confidence),
 		Tags:        splitList(*tags),
 		About:       splitList(*about),
