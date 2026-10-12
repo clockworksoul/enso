@@ -95,6 +95,12 @@ func isAlphaNum(r rune) bool {
 const (
 	specStructuralWeight = 1.0 // TUNABLE — term matched in Tags/About
 	specContentWeight    = 0.4 // TUNABLE — term matched only in Content
+
+	// blendRelevanceWeight and blendStrengthWeight combine query relevance
+	// and decay strength into one score. Neither signal is a gate: enough
+	// strength can overcome a weak match, while a strong match still matters.
+	blendRelevanceWeight = 0.60 // TUNABLE — query relevance share
+	blendStrengthWeight  = 0.40 // TUNABLE — normalized decay-strength share
 )
 
 // Specificity scores how specifically entry e answers a query described by
@@ -157,13 +163,16 @@ func Specificity(e Entry, queryTerms []string) float64 {
 	return sum / float64(n)
 }
 
-// ScoredEntry pairs an Entry with its specificity (query-match) and strength
-// (decay) at query time, so callers can inspect why an entry ranked where it
-// did. Specificity is the primary sort key; Strength is the tiebreaker.
+// ScoredEntry pairs an Entry with the query and decay signals computed at
+// ranking time, so callers can inspect why it ranked where it did. Score is
+// the active ranker's primary score; legacy specificity mode still uses
+// Strength as a tiebreaker when Score/Specificity are equal.
 type ScoredEntry struct {
 	Entry       Entry
-	Specificity float64 // Specificity(Entry, queryTerms) — primary key
-	Strength    float64 // StrengthAt(Entry, now)         — tiebreaker
+	Specificity float64 // lexical Specificity(Entry, queryTerms)
+	Relevance   float64 // specificity plus any supplemental doorfinder signal
+	Strength    float64 // StrengthAt(Entry, now)
+	Score       float64 // active ranker's combined score
 }
 
 // RankBySpecificity is the Stage 5 query-aware ranker. It sorts entries by
@@ -188,12 +197,55 @@ func RankBySpecificity(entries []Entry, queryTerms []string, now time.Time) []Sc
 			Specificity: Specificity(e, queryTerms),
 			Strength:    StrengthAt(e, now),
 		}
+		scored[i].Relevance = scored[i].Specificity
+		scored[i].Score = scored[i].Specificity
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
 		if scored[i].Specificity != scored[j].Specificity {
 			return scored[i].Specificity > scored[j].Specificity
 		}
 		return scored[i].Strength > scored[j].Strength
+	})
+	return scored
+}
+
+// RankByBlend ranks every entry on one continuous score instead of making a
+// non-zero query match an unconditional gate over a zero-match entry:
+//
+//	score = blendRelevanceWeight*relevance + blendStrengthWeight*(StrengthAt/SCap)
+//
+// relevance starts at lexical Specificity and may be raised by supplemental
+// query-dependent evidence (for example vector seeding or graph traversal).
+// Supplemental values are floors, not bonuses, so signals are not double-
+// counted. Both relevance and normalized strength are in [0,1] under the
+// domain's temporal invariants, making the weights directly interpretable.
+//
+// This function intentionally does not special-case an empty query. Callers
+// that promise the empty-query=pure-decay invariant should route that mode to
+// Rank/RankBySpecificity directly, as GraphStore.Recall does.
+func RankByBlend(entries []Entry, queryTerms []string, supplemental map[ID]float64, now time.Time) []ScoredEntry {
+	scored := make([]ScoredEntry, len(entries))
+	for i, e := range entries {
+		specificity := Specificity(e, queryTerms)
+		relevance := specificity
+		if extra := supplemental[e.ID]; extra > relevance {
+			relevance = extra
+		}
+		strength := StrengthAt(e, now)
+		normalizedStrength := 0.0
+		if e.Temporal.SCap > 0 {
+			normalizedStrength = strength / e.Temporal.SCap
+		}
+		scored[i] = ScoredEntry{
+			Entry:       e,
+			Specificity: specificity,
+			Relevance:   relevance,
+			Strength:    strength,
+			Score:       blendRelevanceWeight*relevance + blendStrengthWeight*normalizedStrength,
+		}
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
 	})
 	return scored
 }

@@ -161,6 +161,33 @@ func TestRankBySpecificity_SpecificBeatsFresherVague(t *testing.T) {
 	}
 }
 
+// TestRankByBlend_FreshStrongBeatsWeakGenericMatch is the regression for the
+// hard specificity gate: an incidental content-word overlap must not force an
+// old, weak entry above a fresh, strong entry with no lexical overlap.
+func TestRankByBlend_FreshStrongBeatsWeakGenericMatch(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	oldMatch := mkEntryAt(t, "old-generic", TypeFact,
+		"database benchmark notes", nil, nil, now.Add(-90*24*time.Hour))
+	fresh := mkEntryAt(t, "fresh-answer", TypeFact,
+		"the release blocker was resolved by rotating the signing key",
+		nil, nil, now)
+	query := Tokenize("database architecture")
+
+	if Specificity(oldMatch, query) == 0 || Specificity(fresh, query) != 0 {
+		t.Fatal("fixture must have only a weak generic match on the old entry")
+	}
+	legacy := RankBySpecificity([]Entry{oldMatch, fresh}, query, now)
+	if legacy[0].Entry.ID != oldMatch.ID {
+		t.Fatal("precondition broken: specificity-first ranking should prefer the weak match")
+	}
+
+	blended := RankByBlend([]Entry{oldMatch, fresh}, query, nil, now)
+	if blended[0].Entry.ID != fresh.ID {
+		t.Fatalf("blended top = %s (score %.3f), want fresh strong entry %s (score %.3f)",
+			blended[0].Entry.ID, blended[0].Score, fresh.ID, blended[1].Score)
+	}
+}
+
 // --- local test helpers -------------------------------------------------------
 
 func mkEntry(t *testing.T, label string, nt NodeType, content string, tags, about []string) Entry {

@@ -35,7 +35,7 @@
 //
 // Usage:
 //
-//	enso-recall -root ~/.openclaw/workspace -query "what happened with granola?" [-k 10] [-now RFC3339] [-index PATH] [-rebuild]
+//	enso-recall -root ~/.openclaw/workspace -query "what happened with granola?" [-k 10] [-ranking blended|specificity|decay] [-now RFC3339] [-index PATH] [-rebuild]
 //
 // With GEMINI_API_KEY set, recall v2 (vector doorfinder) runs; without it, or
 // on any provider failure, recall degrades to lexical+traversal and the JSON
@@ -56,7 +56,7 @@
 //	  "corpus_entries": 35,
 //	  "index_path": ".../.enso/index.kuzu",  // "" when a fresh in-memory index was used
 //	  "index_built": false,      // true when this call paid the cold rebuild+embed cost
-//	  "results": [ { "id", "type", "content", "specificity", "strength" }, ... ]
+//	  "results": [ { "id", "type", "content", "specificity", "relevance", "strength", "score" }, ... ]
 //	}
 //
 // Errors (unreadable corpus, malformed entries) are LOUD: message on stderr,
@@ -79,8 +79,9 @@ import (
 
 // schemaVersion is the stdout JSON contract version. The shadow extension
 // refuses output whose version it does not know, so bumps are deliberate.
-// index_path/index_built were added as an ADDITIVE superset (2026-10-01), so
-// the version stays 1 — the bridge reads only known fields and ignores extras.
+// index_path/index_built and ranking diagnostics were added as ADDITIVE
+// supersets, so the version stays 1 — the bridge reads only known fields and
+// ignores extras.
 const schemaVersion = 1
 
 // defaultIndexRelPath is where the persisted KùzuDB index lives relative to the
@@ -93,7 +94,9 @@ type resultJSON struct {
 	Type        string  `json:"type"`
 	Content     string  `json:"content"`
 	Specificity float64 `json:"specificity"`
+	Relevance   float64 `json:"relevance"`
 	Strength    float64 `json:"strength"`
+	Score       float64 `json:"score"`
 }
 
 type outputJSON struct {
@@ -116,6 +119,7 @@ func main() {
 	nowFlag := flag.String("now", "", "as-of instant, RFC3339 (default: now UTC); for replay/tests")
 	indexFlag := flag.String("index", "", "persisted index path (default <root>/"+defaultIndexRelPath+"); \"-\" forces a fresh in-memory index")
 	rebuild := flag.Bool("rebuild", false, "force a cold rebuild of the persisted index even if it looks fresh")
+	ranking := flag.String("ranking", string(graphstore.RankingBlended), "ranking mode: blended, specificity (legacy tiered), or decay")
 	flag.Parse()
 
 	if err := run(runConfig{
@@ -125,6 +129,7 @@ func main() {
 		nowFlag: *nowFlag,
 		index:   *indexFlag,
 		rebuild: *rebuild,
+		ranking: *ranking,
 	}, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "enso-recall: %v\n", err)
 		os.Exit(1)
@@ -138,6 +143,7 @@ type runConfig struct {
 	nowFlag string
 	index   string // "" = default path; "-" = fresh in-memory (no persistence)
 	rebuild bool
+	ranking string // "" = blended default
 }
 
 func run(cfg runConfig, out *os.File) error {
@@ -181,7 +187,11 @@ func run(cfg runConfig, out *os.File) error {
 	}
 	defer g.Close()
 
-	rr, err := g.Recall(ctx, cfg.query, now)
+	ranking := graphstore.RankingMode(cfg.ranking)
+	if ranking == "" {
+		ranking = graphstore.RankingBlended
+	}
+	rr, err := g.RecallWithOptions(ctx, cfg.query, now, graphstore.RecallOptions{Ranking: ranking})
 	if err != nil {
 		return err
 	}
@@ -209,7 +219,9 @@ func run(cfg runConfig, out *os.File) error {
 			Type:        string(r.Entry.Type),
 			Content:     r.Entry.Content,
 			Specificity: r.Specificity,
+			Relevance:   r.Relevance,
 			Strength:    r.Strength,
+			Score:       r.Score,
 		})
 	}
 

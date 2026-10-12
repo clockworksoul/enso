@@ -136,3 +136,47 @@ func TestRecallEmptyQueryIsRecentMode(t *testing.T) {
 		}
 	}
 }
+
+// TestRecallRankingModes pins the production regression and both explicit
+// fallback modes. Blended is the default; legacy specificity preserves the
+// old hard tier; decay ignores query relevance.
+func TestRecallRankingModes(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	mk := func(label, content string, at time.Time) core.Entry {
+		t.Helper()
+		id, err := core.NewID(at, label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := core.NewEntry(core.NewEntryParams{
+			ID: id, Type: core.TypeFact, Content: content, EncodedTime: at,
+			Confidence: core.ConfHigh, Tags: []string{}, About: []string{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	oldMatch := mk("old-generic", "database benchmark notes", now.Add(-90*24*time.Hour))
+	fresh := mk("fresh-answer", "the release blocker was resolved by rotating the signing key", now)
+	g, err := OpenRebuilt(context.Background(), "", []core.Entry{oldMatch, fresh}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+
+	checkTop := func(name string, opts RecallOptions, want core.ID) {
+		t.Helper()
+		rr, err := g.RecallWithOptions(context.Background(), "database architecture", now, opts)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(rr.Ranked) == 0 || rr.Ranked[0].Entry.ID != want {
+			t.Fatalf("%s top = %v, want %s", name, rankedIDs(rr), want)
+		}
+	}
+
+	checkTop("blended default", RecallOptions{}, fresh.ID)
+	checkTop("legacy specificity", RecallOptions{Ranking: RankingSpecificity}, oldMatch.ID)
+	checkTop("decay", RecallOptions{Ranking: RankingDecay}, fresh.ID)
+}

@@ -27,8 +27,9 @@ import (
 //  3. FILTER — drop superseded entries (any id targeted by a SUPERSEDES edge)
 //     and entries whose ValidUntil has passed. Identical semantics to the
 //     Phase-1 pipeline's filter.
-//  4. RANK — core.RankBySpecificity (specificity-first, decay-tiebroken),
-//     unchanged from Phase 1.
+//  4. RANK — blend query relevance and decay strength across all current
+//     entries. Explicit diagnostic modes retain the old tiered-specificity
+//     order and pure-decay order.
 //
 // An empty query degrades to the no-query "recent" mode: all current entries
 // ranked by decay strength alone (the same invariant RankBySpecificity keeps).
@@ -41,6 +42,35 @@ var traversalRels = []core.EdgeType{core.EdgeRelatesTo, core.EdgeOwns, core.Edge
 // exactly entry → entity-ref ← entry, the connected-fact shape; anything
 // deeper is query-language cleverness the WP's non-goals prohibit.
 const maxHops = 2
+
+// Doorfinder affinities are minimum relevance values for non-lexical hits.
+// Vector similarity is direct query evidence; undirected graph adjacency is a
+// deliberately lighter signal because traversal can also walk from a precise
+// child back to its vague parent.
+const (
+	vectorAffinity    = 0.50 // TUNABLE — vector-seed relevance floor
+	traversalAffinity = 0.05 // TUNABLE — graph-only relevance floor
+)
+
+// RankingMode selects how current entries are ordered after recall filtering.
+type RankingMode string
+
+const (
+	// RankingBlended is the default query path: one relevance+strength score
+	// across every kept entry.
+	RankingBlended RankingMode = "blended"
+	// RankingSpecificity preserves the legacy hard two-tier order for
+	// benchmarks and fallback comparisons.
+	RankingSpecificity RankingMode = "specificity"
+	// RankingDecay ignores query relevance and orders only by decay strength.
+	RankingDecay RankingMode = "decay"
+)
+
+// RecallOptions exposes ranking alternatives without changing Recall's
+// default happy path. A zero Ranking value means RankingBlended.
+type RecallOptions struct {
+	Ranking RankingMode
+}
 
 // RecallMode reports which doorfinding path a recall actually used — callers
 // (and the provider-outage test) must be able to tell degradation from health.
@@ -66,30 +96,33 @@ type RecallResult struct {
 	Degraded error
 }
 
-// Recall returns ALL current entries ranked best-first, with their
-// specificity and decay-strength scores attached. Like the Phase-1 pipeline,
-// recall never hides a current entry — ranking, not omission, expresses
-// relevance (callers take top-k). The graph's contribution is a two-tier
-// order:
-//
-//	tier 1: entries that match the query lexically (seeds) PLUS entries
-//	        reached from a seed by traversal — ranked specificity-first,
-//	        decay-tiebroken (core.RankBySpecificity, unchanged).
-//	tier 2: every other current entry, in pure decay order.
-//
-// The tiering is where connected-fact retrieval becomes real: an entry that
-// matches nothing lexically but is EDGE-CONNECTED to a match outranks
-// unconnected noise, which no flat-file ranker can express. On a corpus with
-// no edges (or a query matching nothing) the tiers collapse to exactly the
-// Phase-1 RankBySpecificity order, so the graph strictly adds reach and never
-// costs parity.
+// Recall returns ALL current entries ranked best-first using the default
+// blended query ranking. Use RecallWithOptions for diagnostic/fallback modes.
+func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (RecallResult, error) {
+	return g.RecallWithOptions(ctx, query, now, RecallOptions{})
+}
+
+// RecallWithOptions returns ALL current entries ranked best-first, with their
+// specificity, relevance, decay strength, and active ranking score attached.
+// Like the Phase-1 pipeline, recall never hides a current entry — ranking, not
+// omission, expresses relevance (callers take top-k). Blended mode treats
+// lexical specificity, vector seeding, and graph traversal as relevance
+// evidence in one continuous score with decay strength. RankingSpecificity
+// retains the previous tier-1-then-tier-2 order exactly for comparison.
 //
 // Recall v2 (WP-4): when an embedder is configured, the query is embedded and
 // entries whose stored content vectors clear vectorMinSim join the seed set
 // (top vectorSeedK by cosine) BEFORE traversal — the doorfinder finds the
 // nodes, the graph walks from them, the same filter/rank judges. Any embedder
 // failure degrades to exactly the WP-3 result with Mode/Degraded reporting it.
-func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (RecallResult, error) {
+func (g *GraphStore) RecallWithOptions(ctx context.Context, query string, now time.Time, opts RecallOptions) (RecallResult, error) {
+	ranking := opts.Ranking
+	if ranking == "" {
+		ranking = RankingBlended
+	}
+	if ranking != RankingBlended && ranking != RankingSpecificity && ranking != RankingDecay {
+		return RecallResult{}, fmt.Errorf("graphstore: unknown ranking mode %q", ranking)
+	}
 	entries, edges, err := g.Load(ctx)
 	if err != nil {
 		return RecallResult{}, err
@@ -126,17 +159,18 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 	}
 
 	// Recent mode: no query terms means no seeds and no tiering — pure decay
-	// rank, identical to core.Rank (the RankBySpecificity degradation
-	// invariant).
+	// rank, identical to core.Rank regardless of the requested ranking mode.
 	if len(terms) == 0 {
-		return RecallResult{Ranked: core.RankBySpecificity(kept, terms, now), Mode: mode}, nil
+		return RecallResult{Ranked: rankByDecay(kept, terms, now), Mode: mode}, nil
 	}
 
 	// SEED (lexical) — current entries that match the query lexically at all.
 	var seeds []core.ID
 	seedSet := map[core.ID]bool{}
+	specificityByID := make(map[core.ID]float64, len(kept))
 	for _, e := range kept {
-		if !seedSet[e.ID] && core.Specificity(e, terms) > 0 {
+		specificityByID[e.ID] = core.Specificity(e, terms)
+		if !seedSet[e.ID] && specificityByID[e.ID] > 0 {
 			seedSet[e.ID] = true
 			seeds = append(seeds, e.ID)
 		}
@@ -145,12 +179,14 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 	// SEED (vector, WP-4) — the doorfinder. Failure at any step degrades to
 	// the lexical pipeline and reports itself; it never empties the answer.
 	var degraded error
+	vectorSet := map[core.ID]bool{}
 	if g.embedder != nil {
 		vecSeeds, err := g.vectorSeeds(ctx, query, kept)
 		if err != nil {
 			mode, degraded = ModeDegraded, err
 		} else {
 			for _, id := range vecSeeds {
+				vectorSet[id] = true
 				if !seedSet[id] {
 					seedSet[id] = true
 					seeds = append(seeds, id)
@@ -161,6 +197,7 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 
 	// EXPAND — Cypher traversal from the seeds (1–2 hops over relevance rels).
 	tier1 := map[core.ID]bool{}
+	reachedSet := map[core.ID]bool{}
 	for id := range seedSet {
 		tier1[id] = true
 	}
@@ -171,12 +208,13 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 		}
 		for _, id := range reached {
 			tier1[id] = true
+			reachedSet[id] = true
 		}
 	}
 
-	// RANK — tier 1 then tier 2, each via the unchanged core ranker (tier 2
-	// entries all score specificity 0, so their RankBySpecificity order IS
-	// pure decay order).
+	// Partition once for both the legacy tiered ranker and the blended
+	// doorfinder affinity. Tier membership is evidence in blended mode, never
+	// an ordering gate.
 	var t1, t2 []core.Entry
 	for _, e := range kept {
 		if tier1[e.ID] {
@@ -185,8 +223,36 @@ func (g *GraphStore) Recall(ctx context.Context, query string, now time.Time) (R
 			t2 = append(t2, e)
 		}
 	}
-	ranked := append(core.RankBySpecificity(t1, terms, now), core.RankBySpecificity(t2, terms, now)...)
+	var ranked []core.ScoredEntry
+	switch ranking {
+	case RankingBlended:
+		supplemental := make(map[core.ID]float64, len(vectorSet)+len(reachedSet))
+		for id := range reachedSet {
+			supplemental[id] = traversalAffinity
+		}
+		for id := range vectorSet {
+			supplemental[id] = vectorAffinity
+		}
+		ranked = core.RankByBlend(kept, terms, supplemental, now)
+	case RankingSpecificity:
+		ranked = append(core.RankBySpecificity(t1, terms, now), core.RankBySpecificity(t2, terms, now)...)
+	case RankingDecay:
+		ranked = rankByDecay(kept, terms, now)
+	}
 	return RecallResult{Ranked: ranked, Mode: mode, Degraded: degraded}, nil
+}
+
+func rankByDecay(entries []core.Entry, terms []string, now time.Time) []core.ScoredEntry {
+	ranked := core.Rank(entries, now)
+	out := make([]core.ScoredEntry, len(ranked))
+	for i, r := range ranked {
+		specificity := core.Specificity(r.Entry, terms)
+		out[i] = core.ScoredEntry{
+			Entry: r.Entry, Specificity: specificity, Relevance: specificity,
+			Strength: r.Strength, Score: r.Strength,
+		}
+	}
+	return out
 }
 
 // latestByID collapses a record stream to one entry per id — the latest
