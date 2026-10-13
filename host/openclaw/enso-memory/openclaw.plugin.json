@@ -1,7 +1,7 @@
 {
   "id": "memory-enso",
   "name": "Ensō Shadow Memory",
-  "description": "Shadow-mode observer for the Ensō memory system: runs Ensō recall alongside the active memory plugin on every turn and logs divergence. Never modifies prompts, never owns the memory slot (WP-7).",
+  "description": "Ensō recall observer: logs divergence alongside the active memory plugin, with explicit opt-in live context injection. Never owns the memory slot (WP-7).",
   "activation": {
     "onStartup": true
   },
@@ -9,6 +9,16 @@
     "tools": ["enso_recall"]
   },
   "uiHints": {
+    "liveRecall": {
+      "label": "Live Recall",
+      "help": "Explicitly opt into injecting score-qualified past context; shadow observation continues. Defaults to false."
+    },
+    "liveRecallMinScore": {
+      "label": "Live Recall Minimum Score",
+      "help": "Minimum blended score for live context (0–1); defaults to 0.5, above the decay-only ceiling.",
+      "advanced": true,
+      "placeholder": "0.5"
+    },
     "corpusRoot": {
       "label": "Corpus Root",
       "placeholder": "~/.openclaw/workspace",
@@ -43,6 +53,8 @@
     "additionalProperties": false,
     "properties": {
       "enabled": { "type": "boolean" },
+      "liveRecall": { "type": "boolean", "default": false },
+      "liveRecallMinScore": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
       "corpusRoot": { "type": "string" },
       "ensoBinary": { "type": "string" },
       "topK": { "type": "integer", "minimum": 1, "maximum": 50 },

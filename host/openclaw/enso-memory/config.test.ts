@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TIMEOUT_MS, DEFAULT_TOP_K, resolveMemoryEnsoConfig } from "./config.js";
+import { DEFAULT_LIVE_RECALL_MIN_SCORE, DEFAULT_TIMEOUT_MS, DEFAULT_TOP_K, resolveMemoryEnsoConfig } from "./config.js";
 
 const manifest = JSON.parse(
   fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf-8"),
@@ -30,8 +30,9 @@ function validatesAgainstConfigSchema(schema: Record<string, unknown>, value: Re
     const v = value[key];
     if (def.type === "string" && typeof v !== "string") return false;
     if (def.type === "boolean" && typeof v !== "boolean") return false;
-    if (def.type === "integer") {
-      if (typeof v !== "number" || !Number.isInteger(v)) return false;
+    if (def.type === "integer" || def.type === "number") {
+      if (typeof v !== "number" || !Number.isFinite(v)) return false;
+      if (def.type === "integer" && !Number.isInteger(v)) return false;
       if (def.minimum !== undefined && v < def.minimum) return false;
       if (def.maximum !== undefined && v > def.maximum) return false;
     }
@@ -43,6 +44,8 @@ describe("memory-enso config", () => {
   it("defaults sanely on an empty config", () => {
     const cfg = resolveMemoryEnsoConfig({});
     expect(cfg.enabled).toBe(true);
+    expect(cfg.liveRecall).toBe(false);
+    expect(cfg.liveRecallMinScore).toBe(DEFAULT_LIVE_RECALL_MIN_SCORE);
     expect(cfg.corpusRoot).toBe(path.join(os.homedir(), ".openclaw", "workspace"));
     expect(cfg.ensoBinary).toBe("enso-recall");
     expect(cfg.topK).toBe(DEFAULT_TOP_K);
@@ -61,9 +64,28 @@ describe("memory-enso config", () => {
     expect(cfg.corpusRoot).toBe(path.join(os.homedir(), "ws"));
   });
 
+  it("requires literal true for live recall opt-in", () => {
+    for (const liveRecall of [undefined, false, "true", 1]) {
+      expect(resolveMemoryEnsoConfig({ liveRecall }).liveRecall).toBe(false);
+    }
+    expect(resolveMemoryEnsoConfig({ liveRecall: true }).liveRecall).toBe(true);
+  });
+
+  it("accepts finite score thresholds in [0,1] and defaults invalid values", () => {
+    for (const liveRecallMinScore of [0, 0.65, 1]) {
+      expect(resolveMemoryEnsoConfig({ liveRecallMinScore }).liveRecallMinScore).toBe(liveRecallMinScore);
+    }
+    for (const liveRecallMinScore of [-1, 1.01, NaN, Infinity, "0.5"]) {
+      expect(resolveMemoryEnsoConfig({ liveRecallMinScore }).liveRecallMinScore).toBe(DEFAULT_LIVE_RECALL_MIN_SCORE);
+      expect(validatesAgainstConfigSchema(manifest.configSchema, { liveRecallMinScore })).toBe(false);
+    }
+  });
+
   it("manifest schema accepts a full config the runtime parser also accepts", () => {
     const value = {
       enabled: true,
+      liveRecall: true,
+      liveRecallMinScore: 0.65,
       corpusRoot: "/tmp/ws",
       ensoBinary: "/usr/local/bin/enso-recall",
       topK: 8,
@@ -73,6 +95,8 @@ describe("memory-enso config", () => {
     expect(validatesAgainstConfigSchema(manifest.configSchema, value)).toBe(true);
     const cfg = resolveMemoryEnsoConfig(value);
     expect(cfg.topK).toBe(8);
+    expect(cfg.liveRecall).toBe(true);
+    expect(cfg.liveRecallMinScore).toBe(0.65);
     expect(cfg.shadowLogDir).toBe("/tmp/shadow");
   });
 });

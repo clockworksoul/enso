@@ -3,8 +3,9 @@
 Shadow-mode observer for Ensō's WP-7 host adapter. It runs Ensō recall
 **alongside** the plugin that owns the memory slot and logs divergence — the
 live evidence for whether Ensō should ever take the slot. It is **not** a
-`kind: memory` plugin: it never claims the slot, never modifies a prompt, and
-never writes to the corpus.
+`kind: memory` plugin: it never claims the slot or writes to the corpus.
+Prompts remain untouched by default; explicit `liveRecall: true` opt-in adds
+compact, score-qualified past context.
 
 **Home:** this directory (`host/openclaw/enso-memory/` in the Ensō repo).
 The standing layout is `host/<host-name>/<plugin-name>/`, leaving each host
@@ -23,11 +24,15 @@ status" below for the one test-only deviation from the original.
 
 ## How it works
 
-- `before_prompt_build` (observation-only): for every turn with a prompt, the
+- `before_prompt_build` (observation-only by default): for every turn with a prompt, the
   extension spawns the `enso-recall` binary (one process per call; hard
   timeout) against the canonical Markdown corpus and logs Ensō's ranked
-  answer. The handler never returns a value, so the host cannot interpret it
-  as a prompt modification.
+  answer. With `liveRecall: true`, it additionally returns `{ prependContext }`
+  containing only results with finite blended `score >= liveRecallMinScore`
+  (default `0.5`). Core ranking is preserved; injection includes at most
+  `min(topK, 3)` memories, each flattened and truncated to 500 characters,
+  labeled as supplementary, possibly outdated context. Missing scores,
+  empty content, or formatting failures produce no injection.
 - `after_tool_call` (observation-only): when the slot owner runs
   `memory_search`/`memory_recall`/`memory_get`, a bounded summary of the
   flat-file result is logged with the same turn key, giving both sides of the
@@ -36,7 +41,8 @@ status" below for the one test-only deviation from the original.
 
 Any failure in the shadow path — missing binary, timeout, malformed output —
 is logged as an `enso_error` record and swallowed. A broken shadow never
-breaks a turn.
+breaks a turn. Injection formatting is also fail-safe and happens after
+shadow JSONL and status writes, so observation continues unchanged.
 
 ## Setup
 
@@ -49,6 +55,9 @@ breaks a turn.
 
 ```jsonc
 {
+  "enabled": true, // false disables observation and injection
+  "liveRecall": false, // explicit true enables prompt context
+  "liveRecallMinScore": 0.5, // finite number in [0,1]
   "corpusRoot": "~/.openclaw/workspace", // dir containing memory/
   "ensoBinary": "~/bin/enso-recall",
   "topK": 5,
@@ -56,6 +65,35 @@ breaks a turn.
   "shadowLogDir": "~/.openclaw/workspace/.enso/shadow",
 }
 ```
+
+To enable live recall in `openclaw.json`, merge these fields into the
+existing plugin entry, retaining its paths and other settings:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "memory-enso": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "liveRecall": true,
+          "liveRecallMinScore": 0.5
+        }
+      }
+    }
+  }
+}
+```
+
+`liveRecall` defaults to `false` and only literal `true` opts in. The score
+threshold defaults to `0.5`, above the blended score's `0.4` decay-only
+ceiling, so freshness alone cannot qualify a memory. Invalid thresholds
+fall back to the default. Existing schema-v1 binaries without `score`
+continue shadow observation but cannot inject.
+
+Run `npm test` and `npm run typecheck` from this directory to validate the
+plugin.
 
 With `GEMINI_API_KEY` in the binary's environment, recall runs the vector
 doorfinder (ADR-002); without it — or on any provider failure — recall

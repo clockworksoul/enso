@@ -21,6 +21,8 @@ function fakeBinary(script: string): string {
 function cfgWith(binary: string, timeoutMs = 2000): MemoryEnsoConfig {
   return {
     enabled: true,
+    liveRecall: false,
+    liveRecallMinScore: 0.5,
     corpusRoot: "/tmp/does-not-matter",
     ensoBinary: binary,
     topK: 5,
@@ -43,7 +45,7 @@ const healthyJSON = JSON.stringify({
   degraded: "",
   elapsed_ms: 3,
   corpus_entries: 2,
-  results: [{ id: "mem:2026-07-04-x", type: "Fact", content: "c", specificity: 1, strength: 0.5 }],
+  results: [{ id: "mem:2026-07-04-x", type: "Fact", content: "c", specificity: 1, strength: 0.5, score: 0.8 }],
 });
 
 describe("enso-bridge", () => {
@@ -53,6 +55,7 @@ describe("enso-bridge", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.output.results[0]?.id).toBe("mem:2026-07-04-x");
+      expect(out.output.results[0]?.score).toBe(0.8);
       expect(out.output.mode).toBe("lexical");
     }
   });

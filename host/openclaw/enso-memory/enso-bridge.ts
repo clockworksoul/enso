@@ -6,7 +6,7 @@
 // PORT-INV: no recall/ranking/supersession logic lives here. This file only
 // spawns, bounds, and parses. Any failure — missing binary, timeout, bad
 // JSON, unknown schema version — returns a typed failure the caller LOGS and
-// swallows; the shadow path must never affect the turn.
+// swallows; a bridge failure must never break the turn.
 
 import { execFile } from "node:child_process";
 import type { MemoryEnsoConfig } from "./config.js";
@@ -20,6 +20,9 @@ export type EnsoRecallResult = {
   content: string;
   specificity: number;
   strength: number;
+  // Older schema-v1 binaries omit this; they remain observable but cannot
+  // qualify for live injection without a finite blended score.
+  score?: number;
 };
 
 export type EnsoRecallOutput = {

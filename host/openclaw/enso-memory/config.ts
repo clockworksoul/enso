@@ -1,13 +1,15 @@
 // Memory Ensō plugin configuration: defensive parsing with boring defaults.
 // The plugin must behave sanely on an empty config object — shadow mode is
-// observation-only, so a misconfiguration degrades to "logs an error record",
-// never to a broken turn.
+// observation-only unless live recall is explicitly opted into. A
+// misconfiguration must never break a turn.
 
 import os from "node:os";
 import path from "node:path";
 
 export type MemoryEnsoConfig = {
   enabled: boolean;
+  liveRecall: boolean;
+  liveRecallMinScore: number;
   corpusRoot: string;
   ensoBinary: string;
   topK: number;
@@ -17,6 +19,9 @@ export type MemoryEnsoConfig = {
 
 export const DEFAULT_TOP_K = 5;
 export const DEFAULT_TIMEOUT_MS = 4000;
+// Blended scores are [0,1]; 0.5 exceeds the 0.4 decay-only ceiling, so
+// freshness alone cannot qualify a memory for live context by default.
+export const DEFAULT_LIVE_RECALL_MIN_SCORE = 0.5;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -45,6 +50,13 @@ export function resolveMemoryEnsoConfig(raw: unknown): MemoryEnsoConfig {
   );
   return {
     enabled: cfg.enabled !== false,
+    liveRecall: cfg.liveRecall === true,
+    liveRecallMinScore:
+      typeof cfg.liveRecallMinScore === "number" &&
+      Number.isFinite(cfg.liveRecallMinScore) &&
+      cfg.liveRecallMinScore >= 0 && cfg.liveRecallMinScore <= 1
+        ? cfg.liveRecallMinScore
+        : DEFAULT_LIVE_RECALL_MIN_SCORE,
     corpusRoot,
     ensoBinary: expandHome(asString(cfg.ensoBinary, "enso-recall")),
     topK: asBoundedInt(cfg.topK, DEFAULT_TOP_K, 1, 50),
