@@ -13,6 +13,19 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/scripts/user_prompt_submit.py\"",
+            "commandWindows": "py -3 \"%PLUGIN_ROOT%\\scripts\\user_prompt_submit.py\"",
+            "timeout": 35,
+            "statusMessage": "Recording Ensō memory use"
+          }
+        ]
+      }
     ]
   }
 }

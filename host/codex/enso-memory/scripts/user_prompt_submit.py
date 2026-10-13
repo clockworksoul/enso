@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-safe Codex UserPromptSubmit adapter for the Ensō recall bridge."""
+"""Fail-safe Codex hooks for Ensō recall and material-use feedback."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import html
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -19,6 +20,7 @@ SUPPORTED_SCHEMA = 1
 DEFAULTS = {
     "mode": "shadow",
     "enso_binary": "enso-recall",
+    "mark_recalled_binary": "enso-mark-recalled",
     "top_k": 5,
     "timeout_ms": 4000,
     "max_context_chars": 4000,
@@ -27,6 +29,7 @@ ENV_KEYS = {
     "mode": "ENSO_CODEX_MODE",
     "corpus_root": "ENSO_CORPUS_ROOT",
     "enso_binary": "ENSO_RECALL_BIN",
+    "mark_recalled_binary": "ENSO_MARK_RECALLED_BIN",
     "top_k": "ENSO_CODEX_TOP_K",
     "timeout_ms": "ENSO_CODEX_TIMEOUT_MS",
     "max_context_chars": "ENSO_CODEX_MAX_CONTEXT_CHARS",
@@ -73,6 +76,8 @@ def load_config() -> dict[str, Any]:
         cfg["corpus_root"] = str(Path(str(cfg["corpus_root"])).expanduser())
     binary = str(cfg["enso_binary"])
     cfg["enso_binary"] = str(Path(binary).expanduser()) if "/" in binary else binary
+    binary = str(cfg["mark_recalled_binary"])
+    cfg["mark_recalled_binary"] = str(Path(binary).expanduser()) if "/" in binary else binary
     return cfg
 
 
@@ -86,8 +91,9 @@ def _bounded_int(value: Any, name: str, minimum: int, maximum: int) -> int:
     return parsed
 
 
-def read_event() -> dict[str, Any]:
-    raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+def read_event(expected_event: str, raw: bytes | None = None) -> dict[str, Any]:
+    if raw is None:
+        raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
     if len(raw) > MAX_INPUT_BYTES:
         raise AdapterError("hook input exceeds size limit")
     try:
@@ -96,10 +102,11 @@ def read_event() -> dict[str, Any]:
         raise AdapterError("hook input is not valid JSON") from exc
     if not isinstance(event, dict):
         raise AdapterError("hook input must be a JSON object")
-    if event.get("hook_event_name") != "UserPromptSubmit":
+    if event.get("hook_event_name") != expected_event:
         raise AdapterError("unsupported hook event")
-    if not isinstance(event.get("prompt"), str) or not event["prompt"].strip():
-        raise AdapterError("prompt is empty")
+    if expected_event == "UserPromptSubmit":
+        if not isinstance(event.get("prompt"), str) or not event["prompt"].strip():
+            raise AdapterError("prompt is empty")
     return event
 
 
@@ -176,6 +183,174 @@ def build_context(results: list[Any], limit: int) -> str:
         if used >= limit:
             break
     return "".join(lines) if len(lines) > 1 else ""
+
+
+STOP_WORDS = set(
+    """the a an and or but if then else for of to in on at by is are was were be
+    been being it its this that these those with as from into about over under so
+    no not yes do does did have has had will would can could should may might i
+    you he she they we me him her them us my your his their our mem type id fact
+    decision entry memory""".split()
+)
+MIN_SHARED_RUN = 3
+
+
+def distinctive_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in re.split(r"[^a-z0-9]+", text.lower())
+        if len(token) > 2 and token not in STOP_WORDS
+    ]
+
+
+def assess_material_use(memory_text: str, reply_text: str) -> tuple[int, str]:
+    """Return a conservative shared-token run and evidence, matching OpenClaw."""
+    memory = distinctive_tokens(memory_text)
+    reply = distinctive_tokens(reply_text)
+    best: list[str] = []
+    for i in range(len(memory)):
+        for j in range(len(reply)):
+            run: list[str] = []
+            while i + len(run) < len(memory) and j + len(run) < len(reply):
+                if memory[i + len(run)] != reply[j + len(run)]:
+                    break
+                run.append(memory[i + len(run)])
+            if len(run) > len(best):
+                best = run
+    if len(best) >= MIN_SHARED_RUN:
+        return len(best), " ".join(best)
+    return 0, ""
+
+
+def _turn_key(event: dict[str, Any]) -> str | None:
+    session = event.get("session_id")
+    turn = event.get("turn_id")
+    if (
+        not isinstance(session, str)
+        or not session
+        or not isinstance(turn, str)
+        or not turn
+    ):
+        return None
+    return hashlib.sha256(f"{session}\0{turn}".encode()).hexdigest()
+
+
+def _pending_path(cfg: dict[str, Any], key: str) -> Path:
+    return _log_dir(cfg) / "pending" / f"{key}.json"
+
+
+def save_pending(cfg: dict[str, Any], event: dict[str, Any], results: list[Any]) -> None:
+    key = _turn_key(event)
+    if key is None:
+        return
+    memories = [
+        {"id": item["id"], "content": item["content"]}
+        for item in results
+        if isinstance(item, dict)
+        and isinstance(item.get("id"), str)
+        and isinstance(item.get("content"), str)
+    ]
+    if not memories:
+        return
+    try:
+        path = _pending_path(cfg, key)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.parent.chmod(0o700)
+        # Remove abandoned pairing records so an interrupted Codex session
+        # cannot leave recalled content in plugin state indefinitely.
+        cutoff = dt.datetime.now().timestamp() - 24 * 60 * 60
+        for stale in path.parent.glob("*.json"):
+            try:
+                if stale.stat().st_mtime < cutoff:
+                    stale.unlink()
+            except OSError:
+                pass
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(
+            json.dumps({"memories": memories}, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+    except OSError:
+        # Reply-use bookkeeping is optional and must not suppress live context.
+        pass
+
+
+def mark_recalled(cfg: dict[str, Any], memory_id: str) -> str | None:
+    command = [
+        cfg["mark_recalled_binary"],
+        "-root",
+        cfg["corpus_root"],
+        "-id",
+        memory_id,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=cfg["timeout_ms"] / 1000,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return str(exc)[:500]
+    if result.returncode != 0:
+        return " ".join(result.stderr.split())[:500] or f"exit {result.returncode}"
+    return None
+
+
+def handle_stop(cfg: dict[str, Any], event: dict[str, Any]) -> None:
+    key = _turn_key(event)
+    if key is None:
+        return
+    path = _pending_path(cfg, key)
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    # Consume first so retries or Stop-hook continuation cannot double-bump.
+    try:
+        path.unlink()
+    except OSError:
+        return
+    reply = event.get("last_assistant_message")
+    reply = reply if isinstance(reply, str) else ""
+    verdicts = []
+    for memory in pending.get("memories", []) if isinstance(pending, dict) else []:
+        if not isinstance(memory, dict):
+            continue
+        memory_id, content = memory.get("id"), memory.get("content")
+        if not isinstance(memory_id, str) or not isinstance(content, str):
+            continue
+        score, evidence = assess_material_use(content, reply)
+        verdict = {"id": memory_id, "used": "yes" if score else "no", "score": score}
+        if evidence:
+            verdict["evidence"] = evidence
+            error = mark_recalled(cfg, memory_id)
+            if error:
+                log_record(
+                    cfg,
+                    event,
+                    {
+                        "kind": "enso_error",
+                        "error": f"enso-mark-recalled {memory_id}: {error}",
+                        "used": "yes",
+                    },
+                )
+        verdicts.append(verdict)
+    if verdicts:
+        log_record(
+            cfg,
+            event,
+            {
+                "kind": "reply_use",
+                "reply_use": verdicts,
+                "used": "yes"
+                if any(v["used"] == "yes" for v in verdicts)
+                else "no",
+            },
+        )
 
 
 def _log_dir(cfg: dict[str, Any]) -> Path:
@@ -297,13 +472,32 @@ def log_record(cfg: dict[str, Any], event: dict[str, Any], record: dict[str, Any
 def main() -> int:
     cfg: dict[str, Any] = dict(DEFAULTS)
     event: dict[str, Any] = {}
+    event_name: str | None = None
     try:
+        # Each Codex hook runs as its own process; Stop completes the pairing
+        # with the earlier prompt hook using the shared session/turn ids.
+        raw_input = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+        if len(raw_input) > MAX_INPUT_BYTES:
+            raise AdapterError("hook input exceeds size limit")
+        raw_event = json.loads(raw_input)
+        if not isinstance(raw_event, dict):
+            raise AdapterError("hook input must be a JSON object")
+        event_name = raw_event.get("hook_event_name")
+        if event_name not in {"UserPromptSubmit", "Stop"}:
+            raise AdapterError("unsupported hook event")
+        event = read_event(str(event_name), raw_input)
         cfg = load_config()
+        if event_name == "Stop":
+            if cfg["mode"] != "off":
+                handle_stop(cfg, event)
+            # Stop requires JSON output; continue the ordinary Codex turn.
+            print('{"continue":true}')
+            return 0
         if cfg["mode"] == "off":
             return 0
-        event = read_event()
         output = run_recall(cfg, event["prompt"])
         results = output["results"]
+        save_pending(cfg, event, results)
         record_outcome(cfg, dt.datetime.now(dt.timezone.utc).isoformat(), True)
         log_record(
             cfg,
@@ -346,6 +540,8 @@ def main() -> int:
         if cfg.get("mode") != "off":
             record_outcome(cfg, dt.datetime.now(dt.timezone.utc).isoformat(), False, detail)
         log_record(cfg, event, {"kind": "enso_error", "error": detail})
+        if event_name == "Stop":
+            print('{"continue":true}')
     return 0
 
 

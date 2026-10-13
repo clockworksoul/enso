@@ -1,8 +1,11 @@
 # Ensō Memory for Codex
 
-Recall-only Codex adapter for the portable Ensō memory substrate. It invokes
-the existing `enso-recall` Go binary for every `UserPromptSubmit` event and
-keeps all Codex concepts outside the canonical Markdown corpus.
+Codex adapter for the portable Ensō memory substrate. It invokes the existing
+`enso-recall` Go binary for every `UserPromptSubmit` event and observes the
+final assistant message at `Stop`. When the reply contains a conservative,
+distinctive three-token match from a recalled memory, it invokes
+`enso-mark-recalled` to reinforce that memory. Codex-specific state stays
+outside the canonical Markdown corpus.
 
 ## Modes
 
@@ -16,12 +19,23 @@ Every failure exits successfully without context. A missing binary, unreadable
 corpus, timeout, malformed output, schema mismatch, or logging failure cannot
 prevent Codex from handling the prompt.
 
+Material-use feedback runs in both `shadow` and `live` modes. The adapter pairs
+each prompt's recall results with its final reply using Codex's `session_id` and
+`turn_id`. It temporarily stores recalled IDs and text under the shadow
+directory so the separate `Stop` hook can compare them; it consumes this state
+afterward and prunes abandoned records older than 24 hours on a later prompt.
+The pairing files are owner-only. The transcript is not parsed. A reply is
+considered a use only when at least three consecutive,
+distinctive tokens appear in both the memory and reply, matching OpenClaw's
+precision-first rule. Only those matches call `enso-mark-recalled`.
+
 ## Prerequisites
 
 Build the host-independent bridge from the Ensō repository:
 
 ```bash
 go build -o /absolute/path/to/enso-recall ./cmd/enso-recall
+go build -o /absolute/path/to/enso-mark-recalled ./cmd/enso-mark-recalled
 ```
 
 Python 3 is required for the standard-library-only hook wrapper.
@@ -42,6 +56,7 @@ present. Individual environment variables override the JSON file:
 | `ENSO_CODEX_MODE` | `mode` | `shadow` |
 | `ENSO_CORPUS_ROOT` | `corpus_root` | required |
 | `ENSO_RECALL_BIN` | `enso_binary` | `enso-recall` |
+| `ENSO_MARK_RECALLED_BIN` | `mark_recalled_binary` | `enso-mark-recalled` |
 | `ENSO_CODEX_TOP_K` | `top_k` | `5` |
 | `ENSO_CODEX_TIMEOUT_MS` | `timeout_ms` | `4000` |
 | `ENSO_CODEX_MAX_CONTEXT_CHARS` | `max_context_chars` | `4000` |
@@ -59,9 +74,11 @@ with `/hooks` after installation.
 ## Telemetry
 
 The adapter writes one JSON object per line under the configured shadow
-directory. Records contain session/turn identifiers, cwd, a SHA-256 of the
-prompt, recall mode, latency, result IDs, and scores. Prompt text and recalled
-content are not logged.
+directory. Recall records contain session/turn identifiers, cwd, a SHA-256 of
+the prompt, recall mode, latency, result IDs, and scores. Reply-use records
+contain per-memory `yes`/`no` verdicts and, for matches, the shared token run.
+Prompt text and assistant replies are not logged. Recalled content is held only
+in short-lived pairing state until the `Stop` hook consumes it.
 
 ## Health status
 
@@ -86,6 +103,5 @@ already had.
 
 ## Non-goals
 
-C0 does not capture memories, commit supersessions, update recall strength,
-parse transcripts, run a daemon, expose MCP tools, or replace native Codex
-memories.
+The adapter does not capture memories, commit supersessions, parse transcripts,
+run a daemon, expose MCP tools, or replace native Codex memories.

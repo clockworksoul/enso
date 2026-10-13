@@ -142,8 +142,9 @@ The integrations are optional. They use the same Markdown memory folder and
   [OpenClaw setup guide](host/openclaw/enso-memory/README.md).
 - **Codex:** The plugin defaults to `shadow` mode, which records recall
   metadata without adding context. Explicitly select `live` mode to inject
-  bounded, labeled historical context. It does not write reinforcement records
-  to the corpus. See the
+  bounded, labeled historical context. A conservative reply-use check appends
+  reinforcement records when a reply materially uses a recalled memory, in
+  either mode. See the
   [Codex setup guide](host/codex/enso-memory/README.md).
 
 Both integrations are designed to fail safely: a recall or logging problem

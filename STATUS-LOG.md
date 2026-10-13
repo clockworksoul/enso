@@ -8,8 +8,9 @@
 **The substrate and both host adapters are implemented. OpenClaw defaults to
 shadow mode and can prepend bounded context when `liveRecall: true`; it does
 not own the `memory` slot. Codex defaults to shadow mode and can inject bounded
-context only when explicitly configured for `live`. No OpenClaw slot takeover
-has been approved.**
+context only when explicitly configured for `live`. Both adapters now derive
+material use from the final reply and append reinforcement only for a
+precision-gated match. No OpenClaw slot takeover has been approved.**
 
 WP-8's implementation blockers are closed: OpenClaw hooks co-key on `runId`,
 `reply_use` derives a precision-gated material-use label from `llm_output`, and
