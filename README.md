@@ -2,176 +2,168 @@
 
 > 円相 — the Zen circle drawn in one uninterrupted brushstroke, deliberately left open. The gap where the brush lifts is not a flaw; it is the form.
 
-**Ensō is a memory system for AI agents built to fix one specific failure: agents that retrieve something that *used to be true* and treat it as current, because plain recency or keyword search can't tell "stale" from "still valid."** It fixes that by storing memories in a structured, auditable Markdown corpus, and having retrieval demote superseded beliefs and follow connections between related facts instead of just matching keywords or picking the newest timestamp. The prior specificity-first pipeline scored 79/79 on a benchmark built from real misses in this project's own history, versus 63% for naive recency and 57% for plain keyword search; the default ranking has since changed to blend relevance and decay, and that gate should be rerun before attributing the old score to the new ranker.
+Ensō is an AI memory system designed to help an assistant avoid treating an
+old belief as current. It keeps memories in readable Markdown files and ranks
+them using both their connection to a question and how current or useful they
+have been.
 
-Its defining truth — *"I don't exist in the gaps between turns"* — is treated as the design, not a flaw to paper over. The circle's open gap is the discontinuity between sessions; the system is what reassembles continuous, trustworthy memory across those gaps.
+## What makes Ensō different
 
-This repo is the canonical home for Ensō's design and (eventually) its implementation. The design was developed in conversation between Matt Titmus and Dross.
+- **You can inspect the memory.** The Markdown files are the source of truth,
+  so a person can read, edit, back up, or move them without Ensō. The search
+  index is only a rebuildable helper.
+- **When a fact changes, its history stays.** Ensō adds the new version and
+  marks the old one as superseded instead of deleting or silently replacing
+  it. That makes it possible to see what was believed before and when it
+  changed.
+- **Recall weighs fit and freshness together.** A close match to the question
+  matters, but a very weak match can lose to a much fresher memory. Ensō can
+  also follow links between related memories.
+- **OpenClaw can learn from use.** Its observer looks for distinctive wording
+  from a recalled memory in the assistant's reply. When it finds a match, it
+  appends a reinforcement record; it does not rewrite the existing memory.
+  This is a cautious text-matching signal, not a complete measure of meaning.
 
----
+Try the command-line tools on your own memory folder, or connect Ensō to an
+assistant.
 
-## Start here
+## One memory across AI assistants
 
-**[`docs/2026-06-20-enso-unified-spec.md`](docs/2026-06-20-enso-unified-spec.md) is the build contract — the single north star.**
+Ensō's memory format and recall engine are shared across assistants. A
+small adapter connects each assistant platform (sometimes called a
+"harness") to the same Markdown memories and `enso-recall` command. Changing
+assistants does not require changing or exporting the memory store; each
+platform just needs its own adapter to pass questions in and context back.
 
-It consolidates the invariants, architecture, and phase plan in one place and delegates depth to the source docs. If you read one file, read that one. Everything below is a summary of it.
-
----
-
-## The rules that cannot break (invariants)
-
-| | Invariant |
-| --- | --- |
-| **INV-1** | **Markdown is canonical and lossless.** The graph/index is a derived, rebuildable cache. Nothing is stored *only* in the graph. |
-| **INV-2** | **History is append-only; nothing is ever destroyed.** Supersession flags; it never deletes. Decay changes *ranking*, never *existence*. |
-| **PORT-INV** | **The memory is fully valuable and reconstructable with zero framework present.** `git clone` onto a bare machine — a human or fresh framework can rebuild complete state. |
-| **AMEND-1** | **The on-disk format is a public, documented contract** — not an opaque implementation detail. The one deliberate departure from classic hexagonal architecture, made in service of PORT-INV. |
-| **RECALL-DEF** | **A memory counts as "recalled" only when it is *surfaced AND materially used* in a reply** — not merely returned by a search. |
-
-Plus two meta-requirements: **fail-safe** (degrade to current behavior on bug, never brick) and **upgrade-safe** (no core fork; build against published SDKs).
-
----
-
-## Architecture in one line
-
-> A framework-blind Markdown substrate, a small embeddable core library as the reference behavior, and adapters (including an optional MCP daemon) as the only framework-aware parts — with the hard rule (AMEND-1) that the files must remain fully interpretable with no code running at all.
-
-It's **hexagonal architecture (ports & adapters)**: the decay/recall/append **core** depends on nothing outward; **driving adapters** (OpenClaw and Codex plugins, CLI) speak in; **driven adapters** (Markdown and KùzuDB graph stores) speak out behind a `Store` port. Share the code, not the runtime.
-
----
-
-## Phases (cone of uncertainty — resolution tracks proximity)
-
-| Phase | Piece | What | Resolution |
-| --- | --- | --- | --- |
-| **0** | Trigger | Benchmark flat-file recall | closed |
-| **1** | Corpus | Structured-Markdown serialization (the durable source of truth) | implemented |
-| **2** | Index | KùzuDB graph store behind the `Store` port | implemented |
-| **3** | Texture | Temporal model + leaky-integrator decay | implemented |
-
-All four phases are closed; see [Status](#status) and [ENSO-STATUS.md](ENSO-STATUS.md) for the current host-side work and evidence gates.
-
----
-
-## Documents
-
-| Doc | Role |
-| --- | --- |
-| [`docs/2026-06-20-enso-unified-spec.md`](docs/2026-06-20-enso-unified-spec.md) | **Build contract (snapshot).** Owns invariants + architecture + phases; delegates depth. **Read this first.** |
-| [`docs/2026-06-16-memory-improvement-design.md`](docs/2026-06-16-memory-improvement-design.md) | The **why/what** — problem, goals, graph rationale, schema, temporal model, risks. |
-| [`docs/2026-06-17-memory-system-technical-spec.md`](docs/2026-06-17-memory-system-technical-spec.md) | The **how** — cone of uncertainty, per-phase mechanism, full Markdown grammar. |
-| [`docs/2026-06-17-phase0-benchmark.md`](docs/2026-06-17-phase0-benchmark.md) | The **measurement** — Phase 0 benchmark plan + running log. |
-| [`docs/2026-06-20-enso-hexagonal-portability-architecture.md`](docs/2026-06-20-enso-hexagonal-portability-architecture.md) | The **portability architecture** — PORT-INV, option space, the hexagon, AMEND-1. |
-
-The four non-unified docs are the **frozen rationale record** (the "why we believe this"). The unified spec is the **plan you build from**. One is history, one is the plan.
-
-> **Note on intra-doc links:** the source docs cross-reference each other using historical `research/...` path prefixes from where they were originally authored. The files now live in `docs/`. Those internal prefixes are left as-authored to preserve the byte-frozen rationale record (and keep the drift-check hashes valid). Use this README's table or the unified spec's §9 to navigate.
-
----
-
-## Drift control
-
-The unified spec is a **snapshot that points back** to four still-living source docs. To keep it from silently going stale, each source is pinned by `sha256` in the spec's §10, and a script verifies them:
-
-```bash
-bash scripts/enso-spec-drift.sh
+```text
+OpenClaw ─┐
+Codex ────┼──> Ensō recall ──> your Markdown memories
+Hermes ───┘    (shared)       (portable and readable)
 ```
 
-- `OK` / **IN SYNC** — snapshot is valid against its sources.
-- **STALE** — a contract source changed; reconcile the unified spec, then update the §10 hash in the same commit.
-- The Phase 0 benchmark doc has a running log that drifts *by design*; the script treats its changes as benign **INFO**, not STALE.
+OpenClaw and Codex adapters are available today. **The near-term plan is to add
+Hermes support next, then prioritize other widely used harnesses.** New
+integrations will start in observation or shadow mode where possible, with
+live context injection opt-in until the integration has been validated. Hermes
+support is planned, not available yet.
 
-**Discipline:** whenever you edit a source doc, re-run the drift check and update the pinned hash in the same commit — and confirm the edit doesn't conflict with another source.
+## Try Ensō with your own notes
 
----
+You need Go 1.26 or newer. From this repository, build the two command-line
+tools:
 
-## Building
-
-Inside-out: the domain core (`internal/core`) has no outward dependencies; Markdown and graph stores plus OpenClaw and Codex adapters are implemented around it.
-
-```bash
-make check      # fmt-check + vet + build + test + spec-drift (the full local gate)
-make test       # go test ./...
-make test-race  # go test -race -count=1 ./...
-make drift      # verify the unified-spec snapshot vs its sources
+```sh
+go build -o ./enso-append ./cmd/enso-append
+go build -o ./enso-recall ./cmd/enso-recall
 ```
 
-Layout:
+Choose a folder for your Ensō memory, then add a fact. Replace the example text
+with something you want your assistant to remember:
 
-| Path | Ring | Status |
-| --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`, blended/specificity/decay ranking), the RECALL-DEF event primitive (`MarkRecalled`), `Store` port | ✅ |
-| `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore`, inline daily-file entries, supersession ceremony, advisory locking | ✅ |
-| `internal/graphstore/` | KùzuDB driven-adapter (WP-3/4) — same `Store` port, deterministic rebuild from Markdown, log-first write path, recall = lexical+vector seeds → 1–2-hop traversal → supersession filter → core ranking, degrade-to-lexical on embedding outage (ADR-002) | ✅ |
-| `internal/memstore/` | In-memory `Store` — test/speed double for the core and bench | ✅ |
-| `internal/storetest/` | Shared `Store`-contract conformance suite all three adapters must pass | ✅ |
-| `internal/bench/` | Offline replay benchmark + the hard gates: 79-case real-miss corpus, WP-3 graph gate, WP-4 vector gate, WP-5 activation proofs | ✅ |
-| `cmd/enso-append`, `cmd/enso-lint` | One-shot structured append (supports backdated `-encoded-time`, normalizes multiline content); write-time corpus validator (same parser as `Load`) | ✅ |
-| `cmd/enso-recall` | One-shot recall CLI with persisted derived index and `blended` (default), `specificity`, or `decay` ranking modes | ✅ |
-| `cmd/enso-classify`, `internal/classify/` | Standalone TF-IDF/logistic-regression memory-worthiness classifier; preliminary offline evaluation only, not an ingestion gate | ✅ |
-| `cmd/corpus-builder`, `cmd/embed-corpus`, `cmd/enso-load-check` | Benchmark tooling: git-history corpus builder, Gemini embedding precompute, corpus load smoke-check | ✅ |
+```sh
+./enso-append \
+  -root "$HOME/my-enso-memory" \
+  -type Fact \
+  -content "The community garden meeting is on Thursday at 6 pm"
+```
 
-> **Detection/correction layer removed (2026-07-08, commit `cd8e1a2`; ratified by ADR-001).** An earlier build grew a recall-*evaluation* layer downstream of the host's search — a correction detector (`core/detect.go`, `core/contradict.go`), a capture chokepoint (`core/correction.go`), a resolver/approval surface (`internal/confirm/`), and fabrication/harvest probes — ~half the codebase. Per ADR-001 (scope b), Ensō is a **complete memory replacement that owns retrieval**, not a permanent eval layer riding on top of an external index, so that layer was deleted and the original-vision skeleton kept (core types, `Store` port, decay math, `mdstore`). The deleted spine lives in git history and returns only by ADR-001 corollary b′ — **real misses first, restoration second, and never before the Phase-2 benchmark gate (WP-4) closes** (see `docs/enso-development-spec.md` RH-9).
+Ask Ensō to find it:
 
-The Markdown format is a **public contract** (AMEND-1), pinned by a golden-file test (`internal/mdstore/testdata/golden_entry.md`; regenerate intentionally with `UPDATE_GOLDEN=1 go test ./internal/mdstore/ -run TestGolden`).
+```sh
+./enso-recall \
+  -root "$HOME/my-enso-memory" \
+  -query "When is the garden meeting?"
+```
 
-## Status
+The first command creates a `memory/` folder and adds a dated Markdown file.
+The second prints ranked results as JSON. The default ranking weighs both how
+closely a memory matches your question and how current it is. For recent
+memories without a question, leave out `-query`:
 
-**All work packages (WP-0 … WP-5) are closed as of 2026-07-18** — see `ENSO-STATUS.md` for the per-WP verdicts and gate numbers. Scope is fixed by **ADR-001**: Ensō is a *complete memory replacement that owns retrieval*, built in gated work packages (`docs/enso-development-spec.md`); the vector engine decision is **ADR-002**.
+```sh
+./enso-recall -root "$HOME/my-enso-memory"
+```
 
-The following results come from the 79-case real-miss corpus in `internal/bench/` and were measured before blended ranking became the default. Re-run the gate before treating them as current-ranker results:
+For example, a successful search returns JSON like this:
 
-- **Staleness suppression:** the prior specificity-first graph recall scored **P@1 = 1.00 with zero stale surfacings** where naive recency scored 0.63 and flat lexical search 0.57 — the SUPERSEDES edge was load-bearing on the 34 same-subject cases specificity alone could not break (+0.43).
-- **Fail-safe vectors (ADR-002):** the vector doorfinder recovers 8 real no-lexical-overlap cases; an embedding-provider outage degrades recall to byte-identical lexical+traversal results — never to zero.
-- **INV-1 proven:** kill-the-graph drills (with and without vectors, and with Phase-3 bump records) rebuild identical recall from Markdown alone.
-- **Phase-3 texture live:** `core.MarkRecalled` wires the spacing-aware RECALL-DEF bump through the Store port as appended temporal-update records (INV-2); on the recency-vs-relevance case, the bumped pipeline surfaces the durable-and-used memory where every recency proxy fails.
+```json
+{
+  "mode": "lexical",
+  "results": [
+    {
+      "id": "mem:2026-10-13-garden-meeting",
+      "type": "Fact",
+      "content": "The community garden meeting is on Thursday at 6 pm",
+      "score": 0.82
+    }
+  ]
+}
+```
 
-Capture *detection* — recognizing a correction from a raw utterance — **returned on 2026-07-18 (WP-6), exactly as ADR-001 b′ prescribed**: restored from git history in its precision-hardened form, against the four real correction utterances, only after WP-4's gate closed. `core.ProposeSupersession` turns an utterance plus the loaded corpus into an evidence-named supersession proposal (contradiction-first, then lexical); confirmation and the ceremony remain the operator's — there is no auto-commit path.
+Results are listed best match first. The score helps order results; it is not a
+probability that the memory is true. Your IDs and scores will differ.
 
-## Using Ensō in an OpenClaw deployment
+The first recall may build a search index under `.enso/` in your memory folder.
+It can be deleted and rebuilt; your Markdown memories remain the source of
+truth. By default, recall works without an API key. If you set
+`GEMINI_API_KEY`, Ensō also uses Google's Gemini embedding API to find related
+memories that use different words. This sends the query and memory text used
+for indexing to that service; leave the key unset to keep recall lexical-only.
 
-**Honest status: Ensō does not own the OpenClaw `memory` slot.** The OpenClaw adapter observes and logs by default; when `liveRecall: true` is explicitly configured, it can prepend a small, score-qualified set of historical memories as supplementary context. It still does not claim the slot. The Codex adapter separately supports explicitly enabled, bounded live context; see [Using Ensō in Codex](#using-ensō-in-codex).
+### Adding or correcting a memory
 
-### What exists now (shadow mode)
+Use `enso-append` to add a `Fact`, `Decision`, `Insight`, `Person`, `Project`,
+or `Task`. For example:
 
-- **`cmd/enso-recall`** (this repo): a one-shot CLI. Given a corpus root and a query, it loads the Markdown corpus, reuses or rebuilds the derived KùzuDB index at `<root>/.enso/index.kuzu`, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It may write that derived index under `.enso/`; it never writes to the canonical Markdown corpus.
-- **`host/openclaw/enso-memory`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers observation hooks (`before_prompt_build`, `after_tool_call` on memory tools) alongside the plugin owning the `memory` slot, plus an `llm_output` observer for material-use labeling. Per turn, it invokes `enso-recall` with a hard timeout and appends JSONL records to `.enso/shadow/YYYY-MM-DD.jsonl`. By default it does not modify the turn; explicit `liveRecall: true` prepends at most three entries with finite blended score at or above `liveRecallMinScore` (default `0.5`), each truncated to 500 characters. Errors are recorded and swallowed.
+```sh
+./enso-append \
+  -root "$HOME/my-enso-memory" \
+  -type Decision \
+  -content "Use the north entrance while the main gate is repaired"
+```
 
-The OpenClaw shadow log records Ensō recall, the active plugin's flat-file result, and a `reply_use` label derived from the host's `llm_output` event. The hooks correlate through the host `runId` when available. The label is a precision-gated lexical signal, not a semantic judgment: it requires a shared run of at least three distinctive tokens and is reviewable through its score and evidence. Existing recall and flat-file lines remain append-only with `used: "unknown"`; `reply_use` adds the verdict as a separate record. See the [OpenClaw adapter README](host/openclaw/enso-memory/README.md) for the log schema and live-recall configuration.
+When a fact changes, add the new version and point to the old entry with
+`-supersede mem:YYYY-MM-DD-old-entry-id`. Ensō keeps the old version in the
+Markdown history and marks it as superseded; it does not erase it. See
+[`FORMAT.md`](FORMAT.md) for the memory types and file format.
 
-WP-8 remains **blocked on collecting a fresh shadow window** with co-keying, reply-use labels, and the persisted vector index active, then having a human review the paired divergent turns. The Jul 25–Aug 11, 2026 corpus predates these fixes and cannot answer the slot-takeover question.
+## Connect Ensō to an assistant
 
-**Host layout:** plugins live at `host/<host-name>/<plugin-name>/`. `host/openclaw/enso-memory/` contains the OpenClaw shadow adapter; `host/codex/enso-memory/` contains the Codex C0 plugin, which defaults to shadow mode and can inject strictly bounded recall through `UserPromptSubmit` when explicitly switched to live mode. The symmetric two-level layout leaves room for additional plugins under either host without another package move.
+The integrations are optional. They use the same Markdown memory folder and
+`enso-recall` command.
 
-### If you want to try shadow mode today
+- **OpenClaw:** The plugin observes recall alongside your existing memory
+  plugin by default. Set `liveRecall: true` to also prepend a small number of
+  high-scoring memories as supplementary historical context. It does not take
+  over OpenClaw's `memory` slot. When its reply-use check finds that a recalled
+  memory was materially used, it appends a reinforcement record to the memory
+  even when `liveRecall` is off; this preserves the history rather than
+  editing it in place. Start with the
+  [OpenClaw setup guide](host/openclaw/enso-memory/README.md).
+- **Codex:** The plugin defaults to `shadow` mode, which records recall
+  metadata without adding context. Explicitly select `live` mode to inject
+  bounded, labeled historical context. It does not write reinforcement records
+  to the corpus. See the
+  [Codex setup guide](host/codex/enso-memory/README.md).
 
-1. Build `cmd/enso-recall` from this repo (`go build ./cmd/enso-recall`) and confirm it runs against your own Markdown memory corpus. The default query ranking is blended relevance and decay; `-ranking specificity|decay` selects diagnostic alternatives.
-2. Use `host/openclaw/enso-memory/` directly from this repo (as of 2026-07-27 it's a normal standalone package here, no `clockworksoul/openclaw` fork checkout needed).
-3. Point it at your `enso-recall` binary and corpus root per the extension's own README.
-4. Watch `.enso/shadow/YYYY-MM-DD.jsonl` accumulate divergence records. Nothing about your live memory recall changes.
+Both integrations are designed to fail safely: a recall or logging problem
+should not stop your assistant from answering. OpenClaw's reinforcement is an
+append-only corpus write; the assistant integrations do not silently edit or
+delete existing Markdown records.
 
-## Next steps
+## What to expect
 
-The substrate is complete; the remaining seams are host-side, each gated on real evidence (RH-2, n ≥ 1):
+Ensō is an active project. OpenClaw slot ownership has not been decided; its
+live option adds context while leaving the existing memory plugin in place.
+The memory-worthiness classifier in this repository is an experimental tool,
+not an automatic filter on what gets saved. For the latest project status, see
+[`STATUS-LOG.md`](STATUS-LOG.md).
 
-1. **Collect a fresh OpenClaw shadow window** with the current adapter and inspect paired recall, flat-file, and `reply_use` records.
-2. **Review divergent turns against the slot-takeover gate.** The lexical `reply_use` heuristic favors precision and can miss paraphrase; inspect its evidence and account for that limitation during labeling.
-3. **Decide OpenClaw slot ownership only from that evidence.** WP-8's decision remains open; no takeover has been made.
+## Contributing
 
-## Using Ensō in Codex
-
-`host/codex/enso-memory/` is the validated Codex C0 plugin. Its
-`UserPromptSubmit` hook invokes the same `cmd/enso-recall` bridge as the
-OpenClaw adapter:
-
-- `shadow` is the default and records only prompt hashes, result IDs, scores,
-  mode, and latency.
-- Explicit `live` mode injects bounded, provenance-bearing historical context.
-- Every adapter failure exits successfully with no injected context.
-
-See [`host/codex/enso-memory/README.md`](host/codex/enso-memory/README.md) for
-build, configuration, trust, and mode instructions. Automatic capture,
-material-use updates, MCP, and marketplace installation remain out of C0.
+For development setup, tests, architecture, project invariants, benchmark
+limitations, and documentation-maintenance guidance, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
