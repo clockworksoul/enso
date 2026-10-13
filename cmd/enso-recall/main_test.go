@@ -222,36 +222,24 @@ func firstID(o outputJSON) string {
 	return o.Results[0].ID
 }
 
-// TestPersistedIndexStaleTriggersRebuild: touching a memory file newer than the
-// index must force a cold rebuild on the next call. The staleness guard fails
-// SAFE toward rebuilding, never toward serving a stale index.
-func TestPersistedIndexStaleTriggersRebuild(t *testing.T) {
+// A recall must serve the old snapshot while another rebuild owns the lock.
+func TestPersistedIndexStaleServesWhileRebuilding(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
 	root := seedCorpus(t)
-	q := "what happened with granola?"
-
-	_ = runToJSON(t, root, q) // cold build
-	if warm := runToJSON(t, root, q); warm.IndexBuilt {
-		t.Fatal("expected warm reuse before touching the corpus")
+	old := runToJSON(t, root, "granola")
+	lock, err := tryRebuildLock(old.IndexPath)
+	if err != nil || lock == nil {
+		t.Fatalf("lock: %v", err)
 	}
-
-	// Make a corpus file newer than the index.
-	future := time.Now().Add(2 * time.Hour)
-	memDir := filepath.Join(root, "memory")
-	ents, err := os.ReadDir(memDir)
-	if err != nil {
+	defer lock.Close()
+	future := time.Now().Add(time.Hour)
+	path := filepath.Join(root, "memory", "2026-07-03.md")
+	if err := os.Chtimes(path, future, future); err != nil {
 		t.Fatal(err)
 	}
-	if len(ents) == 0 {
-		t.Fatal("seed corpus wrote no memory files")
-	}
-	touched := filepath.Join(memDir, ents[0].Name())
-	if err := os.Chtimes(touched, future, future); err != nil {
-		t.Fatal(err)
-	}
-
-	if rebuilt := runToJSON(t, root, q); !rebuilt.IndexBuilt {
-		t.Fatal("a corpus file newer than the index must trigger a cold rebuild")
+	stale := runToJSON(t, root, "granola")
+	if stale.IndexBuilt || !stale.IndexStale || stale.RebuildStarted || stale.CorpusEntries != old.CorpusEntries {
+		t.Fatalf("stale recall while locked: %+v", stale)
 	}
 }
 

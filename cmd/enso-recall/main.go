@@ -18,12 +18,10 @@
 // with -index). On the WARM path (index present and no memory/*.md file newer
 // than it) it Opens the persisted graph and attaches the embedder ONLY for the
 // single query embed — no corpus re-embed, measured ~0.46s end to end, ~40x
-// faster and ~9x under the 4s shadow deadline. On the COLD path (index absent,
-// stale, or -rebuild) it rebuilds the on-disk index from the Markdown corpus,
-// paying the one-time embed cost, then recalls. A wrong staleness call degrades
-// to a rebuild, never to corruption: the index is derived and the
-// kill-the-graph drill proves it is always reconstructable from Markdown
-// (INV-1). The corpus itself is still never written.
+// faster and ~9x under the 4s shadow deadline. On the COLD path (index absent
+// or -rebuild) it rebuilds the on-disk index from the Markdown corpus,
+// paying the one-time embed cost, then recalls. A stale existing index is served
+// immediately while a detached worker builds and atomically publishes a new one.
 //
 // READ-ONLY WITH RESPECT TO THE CORPUS BY CONSTRUCTION: this binary loads the
 // Markdown corpus and (re)builds a derived index UNDER <root>/.enso/; it never
@@ -56,6 +54,8 @@
 //	  "corpus_entries": 35,
 //	  "index_path": ".../.enso/index.kuzu",  // "" when a fresh in-memory index was used
 //	  "index_built": false,      // true when this call paid the cold rebuild+embed cost
+//	  "index_stale": false,      // this recall served a stale existing snapshot
+//	  "rebuild_started": false,  // this call started a detached rebuild worker
 //	  "results": [ { "id", "type", "content", "specificity", "relevance", "strength", "score" }, ... ]
 //	}
 //
@@ -68,9 +68,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/clockworksoul/enso/internal/graphstore"
@@ -100,16 +100,18 @@ type resultJSON struct {
 }
 
 type outputJSON struct {
-	Version       int          `json:"version"`
-	Query         string       `json:"query"`
-	AsOf          string       `json:"as_of"`
-	Mode          string       `json:"mode"`
-	Degraded      string       `json:"degraded"`
-	ElapsedMS     int64        `json:"elapsed_ms"`
-	CorpusEntries int          `json:"corpus_entries"`
-	IndexPath     string       `json:"index_path"`
-	IndexBuilt    bool         `json:"index_built"`
-	Results       []resultJSON `json:"results"`
+	Version        int          `json:"version"`
+	Query          string       `json:"query"`
+	AsOf           string       `json:"as_of"`
+	Mode           string       `json:"mode"`
+	Degraded       string       `json:"degraded"`
+	ElapsedMS      int64        `json:"elapsed_ms"`
+	CorpusEntries  int          `json:"corpus_entries"`
+	IndexPath      string       `json:"index_path"`
+	IndexBuilt     bool         `json:"index_built"`
+	IndexStale     bool         `json:"index_stale"`
+	RebuildStarted bool         `json:"rebuild_started"`
+	Results        []resultJSON `json:"results"`
 }
 
 func main() {
@@ -181,6 +183,17 @@ func run(cfg runConfig, out *os.File) error {
 		emb = graphstore.GeminiEmbedder{APIKey: key}
 	}
 
+	stale := false
+	if indexPath != "" && !cfg.rebuild {
+		fresh, err := indexIsFresh(indexPath, cfg.root)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(indexPath); err == nil {
+			stale = !fresh
+		}
+	}
+
 	g, corpusEntries, built, err := openIndex(ctx, indexPath, emb, cfg.root, cfg.rebuild)
 	if err != nil {
 		return err
@@ -196,16 +209,26 @@ func run(cfg runConfig, out *os.File) error {
 		return err
 	}
 
+	started := false
+	if stale {
+		started, err = startBackgroundRebuild(indexPath, cfg.root)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "enso-recall: background rebuild: %v\n", err)
+		}
+	}
+
 	o := outputJSON{
-		Version:       schemaVersion,
-		Query:         cfg.query,
-		AsOf:          now.Format(time.RFC3339),
-		Mode:          string(rr.Mode),
-		ElapsedMS:     time.Since(start).Milliseconds(),
-		CorpusEntries: corpusEntries,
-		IndexPath:     indexPath,
-		IndexBuilt:    built,
-		Results:       []resultJSON{}, // always an array, never null
+		Version:        schemaVersion,
+		Query:          cfg.query,
+		AsOf:           now.Format(time.RFC3339),
+		Mode:           string(rr.Mode),
+		ElapsedMS:      time.Since(start).Milliseconds(),
+		CorpusEntries:  corpusEntries,
+		IndexPath:      indexPath,
+		IndexBuilt:     built,
+		IndexStale:     stale,
+		RebuildStarted: started,
+		Results:        []resultJSON{}, // always an array, never null
 	}
 	if rr.Degraded != nil {
 		o.Degraded = rr.Degraded.Error()
@@ -230,40 +253,39 @@ func run(cfg runConfig, out *os.File) error {
 	return enc.Encode(o)
 }
 
-// openIndex returns a ready-to-recall GraphStore, (re)building the persisted
-// index only when necessary. It reports how many canonical corpus entries back
-// the current index and whether this call paid the cold rebuild cost.
-//
-// WARM: the persisted index exists, is not forced, and no memory/*.md file is
-// newer than it — Open it and attach the embedder for the query embed only. The
-// corpus is loaded once (via the graph's own Load during Recall); its entry
-// count is read cheaply from the opened graph.
-//
-// COLD: the index is absent, stale, forced (-rebuild), or in-memory ("") — load
-// the Markdown corpus and rebuild the index from it, embedding at append time.
-//
-// A stale-but-present index that we misjudge as fresh is the only soft-failure
-// mode, and it degrades to "slightly out-of-date recall," never corruption: the
-// corpus stays canonical and the next rebuild heals it (INV-1). The mtime guard
-// below is conservative — ANY memory file newer than the index triggers a
-// rebuild.
+// openIndex serves an existing snapshot, even when stale. run schedules stale
+// snapshots for background replacement. Missing and forced indexes build cold.
 func openIndex(ctx context.Context, indexPath string, emb graphstore.Embedder, root string, forceRebuild bool) (*graphstore.GraphStore, int, bool, error) {
 	// In-memory mode ("-"): no persistence, always a cold rebuild (old behavior).
 	if indexPath == "" {
 		return coldRebuild(ctx, "", emb, root)
 	}
 
-	fresh, err := indexIsFresh(indexPath, root)
+	if forceRebuild {
+		return coldRebuild(ctx, indexPath, emb, root)
+	}
+	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+		return coldRebuild(ctx, indexPath, emb, root)
+	} else if err != nil {
+		return nil, 0, false, err
+	}
+
+	// Clean abandoned builds only while holding the rebuild lock.
+	lock, err := tryRebuildLock(indexPath)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	if forceRebuild || !fresh {
-		return coldRebuild(ctx, indexPath, emb, root)
+	if lock != nil {
+		err = cleanTemporaryIndexes(indexPath)
+		lock.Close()
+		if err != nil {
+			return nil, 0, false, err
+		}
 	}
 
 	// WARM path: reuse the persisted index. Attach the embedder for the query
 	// embed only — no Append runs here, so the corpus is never re-embedded.
-	g, err := graphstore.Open(indexPath)
+	g, err := graphstore.OpenReadOnly(indexPath)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -280,31 +302,73 @@ func openIndex(ctx context.Context, indexPath string, emb graphstore.Embedder, r
 
 // coldRebuild loads the canonical Markdown corpus and rebuilds the index from
 // it (embedding at append time when emb != nil). Used for the first build, a
-// stale index, a forced -rebuild, or the in-memory diagnostic path.
+// forced -rebuild, or the in-memory diagnostic path.
 func coldRebuild(ctx context.Context, indexPath string, emb graphstore.Embedder, root string) (*graphstore.GraphStore, int, bool, error) {
+	var lock *os.File
 	if indexPath != "" {
-		// Ensure the parent (.enso/) exists; it is derived cache, not corpus.
-		if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-			return nil, 0, false, fmt.Errorf("enso-recall: create index dir: %w", err)
+		var err error
+		lock, err = waitRebuildLock(ctx, indexPath)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		defer lock.Close()
+		if err := cleanTemporaryIndexes(indexPath); err != nil {
+			return nil, 0, false, err
 		}
 	}
+	// Stamp the snapshot with the build start, so a corpus edit during loading
+	// or embedding still makes the newly published index stale.
+	buildStart := time.Now()
 	corpus := mdstore.NewFSStore(root)
 	entries, edges, err := corpus.Load(ctx)
 	if err != nil {
 		return nil, 0, false, err // mdstore errors are already located (file+line) and loud
 	}
-	g, err := graphstore.OpenRebuiltWith(ctx, indexPath, emb, entries, edges)
+	buildPath := indexPath
+	if indexPath != "" {
+		f, err := os.CreateTemp(filepath.Dir(indexPath), filepath.Base(indexPath)+".tmp-")
+		if err != nil {
+			return nil, 0, false, err
+		}
+		buildPath = f.Name()
+		f.Close()
+		defer os.RemoveAll(buildPath)
+		defer os.RemoveAll(buildPath + ".wal")
+	}
+	g, err := graphstore.OpenRebuiltWith(ctx, buildPath, emb, entries, edges)
 	if err != nil {
 		return nil, 0, false, err
+	}
+	if indexPath == "" {
+		return g, len(entries), true, nil
+	}
+
+	// Closing checkpoints the WAL into Kùzu's single database file before it
+	// becomes visible. Never remove or rebuild the live file in place.
+	g.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
+	}
+	if err := os.Chtimes(buildPath, buildStart, buildStart); err != nil {
+		return nil, 0, false, err
+	}
+	if err := os.Rename(buildPath, indexPath); err != nil {
+		return nil, 0, false, err
+	}
+	g, err = graphstore.OpenReadOnly(indexPath)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if emb != nil {
+		g.SetEmbedder(emb)
 	}
 	return g, len(entries), true, nil
 }
 
 // indexIsFresh reports whether the persisted index at indexPath is present and
 // no canonical memory/*.md file is newer than it. A missing index is not fresh
-// (triggers a cold build). The mtime of the index DIRECTORY (KùzuDB stores the
-// database as a directory/file set) is compared against the newest mtime under
-// <root>/memory. Any error reading the corpus tree is loud, not silently
+// (triggers a cold build). The mtime of the index file is compared against
+// the newest corpus-file mtime under <root>/memory. Any error reading the corpus tree is loud, not silently
 // treated as fresh — a staleness check that fails open would silently serve a
 // stale index.
 func indexIsFresh(indexPath, root string) (bool, error) {
@@ -328,35 +392,28 @@ func indexIsFresh(indexPath, root string) (bool, error) {
 	return !indexMod.Before(newest), nil
 }
 
-// newestMemoryMod returns the most recent modification time among all regular
-// files under dir (the corpus's memory/ tree). A missing dir yields the zero
-// time with no error (an empty corpus has nothing to be stale against).
+// newestMemoryMod matches FSStore.Load: only direct, non-directory children
+// with a case-sensitive .md suffix. Stat follows file symlinks, like ReadFile.
 func newestMemoryMod(dir string) (time.Time, error) {
 	var newest time.Time
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) && path == dir {
-				return filepath.SkipDir // no memory/ dir: nothing to compare
-			}
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		fi, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if fi.ModTime().After(newest) {
-			newest = fi.ModTime()
-		}
-		return nil
-	})
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return newest, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return time.Time{}, nil
+		return newest, fmt.Errorf("enso-recall: scan corpus mtimes: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
 		}
-		return time.Time{}, fmt.Errorf("enso-recall: scan corpus mtimes: %w", err)
+		info, err := os.Stat(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return newest, fmt.Errorf("enso-recall: stat corpus file: %w", err)
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
 	}
 	return newest, nil
 }

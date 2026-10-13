@@ -91,14 +91,26 @@ var errClosed = fmt.Errorf("graphstore: store is closed")
 // schema exists. The database is a derived artifact: deleting path and calling
 // OpenRebuilt with the Markdown corpus reconstructs it completely (INV-1).
 func Open(path string) (*GraphStore, error) {
+	return open(path, false)
+}
+
+// OpenReadOnly opens an existing, fully built index without schema writes or
+// an exclusive writer lock. Multiple recall processes may share this snapshot.
+func OpenReadOnly(path string) (*GraphStore, error) {
+	return open(path, true)
+}
+
+func open(path string, readOnly bool) (*GraphStore, error) {
 	var (
 		db  *kuzu.Database
 		err error
 	)
+	config := kuzu.DefaultSystemConfig()
+	config.ReadOnly = readOnly
 	if path == "" {
 		db, err = kuzu.OpenInMemoryDatabase(kuzu.DefaultSystemConfig())
 	} else {
-		db, err = kuzu.OpenDatabase(path, kuzu.DefaultSystemConfig())
+		db, err = kuzu.OpenDatabase(path, config)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("graphstore: open database %q: %w", path, err)
@@ -109,9 +121,11 @@ func Open(path string) (*GraphStore, error) {
 		return nil, fmt.Errorf("graphstore: open connection: %w", err)
 	}
 	g := &GraphStore{db: db, conn: conn}
-	if err := g.ensureSchema(); err != nil {
-		g.Close()
-		return nil, err
+	if !readOnly {
+		if err := g.ensureSchema(); err != nil {
+			g.Close()
+			return nil, err
+		}
 	}
 	if err := g.loadNextSeq(); err != nil {
 		g.Close()
