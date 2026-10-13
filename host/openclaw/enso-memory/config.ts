@@ -1,6 +1,6 @@
 // Memory Ensō plugin configuration: defensive parsing with boring defaults.
-// The plugin must behave sanely on an empty config object — shadow mode is
-// observation-only unless live recall is explicitly opted into. A
+// The plugin must behave sanely on an empty config object — shadow mode
+// does not inject context unless live recall is explicitly opted into. A
 // misconfiguration must never break a turn.
 
 import os from "node:os";
@@ -12,6 +12,7 @@ export type MemoryEnsoConfig = {
   liveRecallMinScore: number;
   corpusRoot: string;
   ensoBinary: string;
+  markRecalledBinary: string;
   topK: number;
   timeoutMs: number;
   shadowLogDir: string;
@@ -59,6 +60,7 @@ export function resolveMemoryEnsoConfig(raw: unknown): MemoryEnsoConfig {
         : DEFAULT_LIVE_RECALL_MIN_SCORE,
     corpusRoot,
     ensoBinary: expandHome(asString(cfg.ensoBinary, "enso-recall")),
+    markRecalledBinary: expandHome(asString(cfg.markRecalledBinary, "enso-mark-recalled")),
     topK: asBoundedInt(cfg.topK, DEFAULT_TOP_K, 1, 50),
     timeoutMs: asBoundedInt(cfg.timeoutMs, DEFAULT_TIMEOUT_MS, 250, 60_000),
     shadowLogDir: expandHome(asString(cfg.shadowLogDir, path.join(corpusRoot, ".enso", "shadow"))),

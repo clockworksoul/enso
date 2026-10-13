@@ -15,9 +15,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "./api.js";
 import plugin, { summarizeToolResult } from "./index.js";
+import * as bridge from "./enso-bridge.js";
 import type { ShadowRecord } from "./shadow-log.js";
 
 type HookHandler = (event: unknown, ctx: unknown) => Promise<unknown>;
@@ -30,7 +31,15 @@ function tmpDir(): string {
   return dir;
 }
 
-afterEach(() => {
+// Label/injection tests do not need background processes; dedicated tests below
+// restore the real bridge to exercise actual CLI success and failure.
+beforeEach(() => {
+  vi.spyOn(bridge, "runEnsoMarkRecalled").mockResolvedValue({ ok: true });
+});
+
+afterEach(async () => {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  vi.restoreAllMocks();
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -358,6 +367,97 @@ describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)"
     await hooks.get("llm_output")?.({ runId, sessionId: "sess-1", assistantTexts }, {});
   }
 
+  it("END TO END: marks only materially used memories with the corpus root and id", async () => {
+    const shadowLogDir = tmpDir();
+    const corpusRoot = tmpDir();
+    vi.mocked(bridge.runEnsoMarkRecalled).mockRestore();
+    const callsFile = path.join(tmpDir(), "calls.jsonl");
+    const markRecalledBinary = path.join(tmpDir(), "enso-mark-recalled");
+    fs.writeFileSync(markRecalledBinary, `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+`, { mode: 0o755 });
+    const ensoBinary = fakeBridge([
+      { id: "mem:omega", content: "Omega livetopology aggregate rewrite shipped" },
+      { id: "mem:owen", content: "Owen birthday is March twentieth" },
+      { id: "mem:omega-detail", content: "Omega livetopology aggregate rewrite shipped yesterday" },
+    ]);
+    const { hooks } = registerPlugin({ shadowLogDir, corpusRoot, ensoBinary, markRecalledBinary });
+
+    await runTurn(hooks, "mark-run", "omega?", ["Omega livetopology aggregate rewrite shipped"]);
+
+    await vi.waitFor(() => {
+      expect(fs.existsSync(callsFile)).toBe(true);
+      expect(fs.readFileSync(callsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line)))
+        .toEqual([
+          ["-root", corpusRoot, "-id", "mem:omega"],
+          ["-root", corpusRoot, "-id", "mem:omega-detail"],
+        ]);
+    });
+  });
+
+  it("does not mark memories with a used=no verdict", async () => {
+    const ensoBinary = fakeBridge([{ id: "mem:omega", content: "Omega livetopology aggregate rewrite shipped" }]);
+    const { hooks } = registerPlugin({ shadowLogDir: tmpDir(), ensoBinary });
+    await runTurn(hooks, "unused", "q", ["The weather is clear today."]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).not.toHaveBeenCalled();
+  });
+
+  it("contains a failing CLI without awaiting it or breaking subsequent turns", async () => {
+    vi.mocked(bridge.runEnsoMarkRecalled).mockRestore();
+    const shadowLogDir = tmpDir();
+    const dir = tmpDir();
+    const started = path.join(dir, "started");
+    const release = path.join(dir, "release");
+    const markRecalledBinary = path.join(dir, "enso-mark-recalled");
+    fs.writeFileSync(markRecalledBinary, `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(started)}, "started");
+const timer = setInterval(() => {
+  if (fs.existsSync(${JSON.stringify(release)})) {
+    clearInterval(timer);
+    process.stderr.write("simulated reinforcement failure");
+    process.exit(1);
+  }
+}, 10);
+`, { mode: 0o755 });
+    const ensoBinary = fakeBridge([{ id: "mem:omega", content: "Omega livetopology aggregate rewrite shipped" }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, markRecalledBinary, timeoutMs: 2000 });
+    try {
+      await hooks.get("before_prompt_build")?.({ prompt: "omega?" }, { runId: "failed-mark" });
+      await expect(hooks.get("llm_output")?.({
+        runId: "failed-mark", assistantTexts: ["Omega livetopology aggregate rewrite shipped"],
+      }, {})).resolves.toBeUndefined();
+      // The hook has returned while the child is held open awaiting release.
+      await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true));
+      expect(readRecords(shadowLogDir).some((r) => r.kind === "enso_error")).toBe(false);
+    } finally {
+      fs.writeFileSync(release, "release");
+    }
+    await vi.waitFor(() => {
+      expect(readRecords(shadowLogDir).find((r) => r.kind === "enso_error"))
+        .toMatchObject({ turn: "failed-mark", error: expect.stringContaining("simulated reinforcement failure") });
+    });
+    expect(readRecords(shadowLogDir).find((r) => r.kind === "reply_use")?.used).toBe("yes");
+    await expect(runTurn(hooks, "next-turn", "q", ["Unrelated weather reply"])).resolves.toBeUndefined();
+    expect(readRecords(shadowLogDir).filter((r) => r.kind === "reply_use")).toHaveLength(2);
+  });
+
+  it("swallows unexpected bridge rejections and keeps marking other used memories", async () => {
+    vi.mocked(bridge.runEnsoMarkRecalled)
+      .mockRejectedValueOnce(new Error("unexpected spawn failure"))
+      .mockResolvedValue({ ok: true });
+    const shadowLogDir = tmpDir();
+    const content = "Omega livetopology aggregate rewrite shipped";
+    const ensoBinary = fakeBridge([{ id: "mem:first", content }, { id: "mem:second", content }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary });
+    await expect(runTurn(hooks, "rejected", "q", [content])).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(bridge.runEnsoMarkRecalled).toHaveBeenCalledTimes(2));
+    expect(readRecords(shadowLogDir).find((r) => r.kind === "enso_error")?.error)
+      .toContain("unexpected spawn failure");
+  });
+
   it("END TO END: labels a materially-used memory yes and an unused one no", async () => {
     const shadowLogDir = tmpDir();
     const ensoBinary = fakeBridge([
@@ -417,6 +517,8 @@ describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)"
       { runId: "run-3", sessionId: "sess-1", assistantTexts: ["omega livetopology aggregate"] },
       {},
     );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).toHaveBeenCalledTimes(1);
     expect(readRecords(shadowLogDir).filter((r) => r.kind === "reply_use")).toHaveLength(1);
   });
 

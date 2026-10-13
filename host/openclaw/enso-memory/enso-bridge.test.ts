@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MemoryEnsoConfig } from "./config.js";
-import { runEnsoRecall, SUPPORTED_SCHEMA_VERSION } from "./enso-bridge.js";
+import { runEnsoMarkRecalled, runEnsoRecall, SUPPORTED_SCHEMA_VERSION } from "./enso-bridge.js";
 
 const tmpDirs: string[] = [];
 
@@ -25,6 +25,7 @@ function cfgWith(binary: string, timeoutMs = 2000): MemoryEnsoConfig {
     liveRecallMinScore: 0.5,
     corpusRoot: "/tmp/does-not-matter",
     ensoBinary: binary,
+    markRecalledBinary: binary,
     topK: 5,
     timeoutMs,
     shadowLogDir: "/tmp/does-not-matter-either",
@@ -99,5 +100,32 @@ describe("enso-bridge", () => {
   it("fails typed when the binary does not exist", async () => {
     const out = await runEnsoRecall(cfgWith("/nonexistent/enso-recall"), "q");
     expect(out.ok).toBe(false);
+  });
+});
+
+describe("mark-recalled bridge", () => {
+  it("accepts successful completion without requiring JSON output", async () => {
+    const out = await runEnsoMarkRecalled(cfgWith(fakeBinary("exit 0")), "mem:used");
+    expect(out).toEqual({ ok: true });
+  });
+
+  it("returns a typed failure for a nonzero exit without duplicating stderr", async () => {
+    const out = await runEnsoMarkRecalled(cfgWith(fakeBinary("echo 'mark failed' >&2; exit 1")), "mem:used");
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.error.split("mark failed")).toHaveLength(2);
+    }
+  });
+
+  it("returns a typed failure for a missing binary", async () => {
+    const out = await runEnsoMarkRecalled(cfgWith("/nonexistent/enso-mark-recalled"), "mem:used");
+    expect(out.ok).toBe(false);
+  });
+
+  it("bounds a hung mark by the configured timeout", async () => {
+    const started = Date.now();
+    const out = await runEnsoMarkRecalled(cfgWith(fakeBinary("exec sleep 30"), 300), "mem:used");
+    expect(out.ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });

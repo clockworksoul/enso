@@ -89,3 +89,28 @@ export function runEnsoRecall(cfg: MemoryEnsoConfig, query: string): Promise<Bri
     );
   });
 }
+
+export type MarkRecalledOutcome =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/** Persists one material-use event, hard-bounded by cfg.timeoutMs. */
+export function runEnsoMarkRecalled(cfg: MemoryEnsoConfig, id: string): Promise<MarkRecalledOutcome> {
+  return new Promise((resolve) => {
+    execFile(
+      cfg.markRecalledBinary,
+      ["-root", cfg.corpusRoot, "-id", id],
+      { timeout: cfg.timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      (error, _stdout, stderr) => {
+        if (error) {
+          const trimmedStderr = stderr.trim();
+          const alreadyIncluded = trimmedStderr !== "" && error.message.includes(trimmedStderr);
+          const detail = trimmedStderr !== "" && !alreadyIncluded ? `: ${trimmedStderr}` : "";
+          resolve({ ok: false, error: `${error.message}${detail}` });
+          return;
+        }
+        resolve({ ok: true });
+      },
+    );
+  });
+}

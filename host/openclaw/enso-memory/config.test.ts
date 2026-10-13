@@ -48,9 +48,16 @@ describe("memory-enso config", () => {
     expect(cfg.liveRecallMinScore).toBe(DEFAULT_LIVE_RECALL_MIN_SCORE);
     expect(cfg.corpusRoot).toBe(path.join(os.homedir(), ".openclaw", "workspace"));
     expect(cfg.ensoBinary).toBe("enso-recall");
+    expect(cfg.markRecalledBinary).toBe("enso-mark-recalled");
     expect(cfg.topK).toBe(DEFAULT_TOP_K);
     expect(cfg.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
     expect(cfg.shadowLogDir).toBe(path.join(cfg.corpusRoot, ".enso", "shadow"));
+  });
+
+  it("defaults invalid or blank mark-recalled paths", () => {
+    for (const markRecalledBinary of [undefined, null, 42, "", "   "]) {
+      expect(resolveMemoryEnsoConfig({ markRecalledBinary }).markRecalledBinary).toBe("enso-mark-recalled");
+    }
   });
 
   it("clamps out-of-bounds numbers back to defaults", () => {
@@ -60,8 +67,9 @@ describe("memory-enso config", () => {
   });
 
   it("expands ~ in configured paths", () => {
-    const cfg = resolveMemoryEnsoConfig({ corpusRoot: "~/ws" });
+    const cfg = resolveMemoryEnsoConfig({ corpusRoot: "~/ws", markRecalledBinary: "~/bin/enso-mark-recalled" });
     expect(cfg.corpusRoot).toBe(path.join(os.homedir(), "ws"));
+    expect(cfg.markRecalledBinary).toBe(path.join(os.homedir(), "bin/enso-mark-recalled"));
   });
 
   it("requires literal true for live recall opt-in", () => {
@@ -88,6 +96,7 @@ describe("memory-enso config", () => {
       liveRecallMinScore: 0.65,
       corpusRoot: "/tmp/ws",
       ensoBinary: "/usr/local/bin/enso-recall",
+      markRecalledBinary: "/usr/local/bin/enso-mark-recalled",
       topK: 8,
       timeoutMs: 2500,
       shadowLogDir: "/tmp/shadow",
@@ -95,6 +104,7 @@ describe("memory-enso config", () => {
     expect(validatesAgainstConfigSchema(manifest.configSchema, value)).toBe(true);
     const cfg = resolveMemoryEnsoConfig(value);
     expect(cfg.topK).toBe(8);
+    expect(cfg.markRecalledBinary).toBe(value.markRecalledBinary);
     expect(cfg.liveRecall).toBe(true);
     expect(cfg.liveRecallMinScore).toBe(0.65);
     expect(cfg.shadowLogDir).toBe("/tmp/shadow");

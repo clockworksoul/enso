@@ -6,7 +6,7 @@
  * test-pinned on the Ensō side and
  * enforced structurally here:
  *
- *   1. OBSERVATION ONLY BY DEFAULT. Only explicit liveRecall opt-in lets
+ *   1. NO CONTEXT INJECTION BY DEFAULT. Only explicit liveRecall opt-in lets
  *      before_prompt_build return compact, score-qualified memory context.
  *      The plugin never claims the memory slot.
  *   2. FAIL-SAFE. Any bridge failure (missing binary, timeout, bad JSON) is
@@ -15,12 +15,13 @@
  *   3. NO MEMORY LOGIC HERE (PORT-INV). Recall, ranking, supersession, and
  *      decay live in the Go core behind the enso-recall binary; this
  *      extension only spawns, parses, logs, and gates/formats live context.
+ *      Material-use verdicts trigger background reinforcement through the core.
  */
 
 import { Type } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
 import { resolveMemoryEnsoConfig, type MemoryEnsoConfig } from "./config.js";
-import { runEnsoRecall, type BridgeOutcome, type EnsoRecallResult } from "./enso-bridge.js";
+import { runEnsoMarkRecalled, runEnsoRecall, type BridgeOutcome, type EnsoRecallResult } from "./enso-bridge.js";
 import {
   appendShadowRecord,
   correlationKey,
@@ -202,13 +203,46 @@ async function shadowRecall(
   return { record, outcome };
 }
 
+/** Background writes are sequential per turn and never awaited by the hook. */
+async function markUsedMemories(
+  api: OpenClawPluginApi,
+  cfg: MemoryEnsoConfig,
+  verdicts: ReplyUseVerdict[],
+  turn: string,
+  source: "runId" | "sessionId",
+): Promise<void> {
+  for (const verdict of verdicts) {
+    if (verdict.used !== "yes") {
+      continue;
+    }
+    let error: string;
+    try {
+      const outcome = await runEnsoMarkRecalled(cfg, verdict.id);
+      if (outcome.ok) {
+        continue;
+      }
+      error = outcome.error;
+    } catch (err) {
+      error = String(err);
+    }
+    safeAppend(api, cfg, {
+      ts: nowISO(),
+      kind: "enso_error",
+      turn,
+      turn_src: source,
+      error: `enso-mark-recalled ${verdict.id}: ${error}`,
+      used: "yes",
+    });
+  }
+}
+
 /**
  * WP-8 blocker (a): the RECALL-DEF observer. Fires on `llm_output` — the one
  * hook that carries BOTH the host-authoritative runId (co-key with the recall
  * side) AND the assistant's actual reply text. Looks up the memories Ensō
  * recalled on this runId, scores each against the reply, and writes a single
- * `reply_use` record labeling material use. Observation-only and fail-safe:
- * any failure is swallowed so a broken label never touches the turn.
+ * `reply_use` record labeling material use. Used memories are reinforced in
+ * the background; any failure is swallowed so it never touches the turn.
  */
 function observeReplyUse(
   api: OpenClawPluginApi,
@@ -250,6 +284,16 @@ function observeReplyUse(
     reply_use: verdicts,
     used: anyUsed ? "yes" : "no",
   });
+  if (anyUsed) {
+    // Defer spawning until after the hook returns; neither process completion
+    // nor its timeout is on the response path. Always contain rejections.
+    setImmediate(() => {
+      void markUsedMemories(api, cfg, verdicts, turn, runId !== undefined ? "runId" : "sessionId")
+        .catch((error) => {
+          api.logger.warn(`memory-enso: mark-recalled contained failure: ${String(error)}`);
+        });
+    });
+  }
 }
 
 export default definePluginEntry({
@@ -359,7 +403,7 @@ export default definePluginEntry({
     // Shadow side C (WP-8 blocker a) — the RECALL-DEF label. llm_output is the
     // only hook carrying both the populated runId (co-key with side A) and the
     // assistant's reply text, so material use is derived here, never earlier.
-    // Observation-only: no return value, failures swallowed.
+    // No return value; reinforcement runs in the background, failures swallowed.
     api.on("llm_output", async (event: unknown) => {
       try {
         observeReplyUse(api, cfg, pendingRecalls, event);

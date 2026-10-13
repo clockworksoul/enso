@@ -37,6 +37,12 @@ status" below for the one test-only deviation from the original.
   `memory_search`/`memory_recall`/`memory_get`, a bounded summary of the
   flat-file result is logged with the same turn key, giving both sides of the
   comparison.
+- `llm_output`: assesses material use of each memory recalled on the turn,
+  logs the verdicts, and reinforces each `used: "yes"` memory through
+  `enso-mark-recalled -root <corpusRoot> -id <id>`. Marking is deferred with
+  `setImmediate` and never awaited by the reply hook. Writes run sequentially
+  within a turn, each bounded by `timeoutMs`; failures are logged and swallowed.
+  Reinforcement also runs when `liveRecall` is false.
 - `enso_recall` tool: on-demand side-by-side check; same bridge, same log.
 
 Any failure in the shadow path — missing binary, timeout, malformed output —
@@ -46,20 +52,22 @@ shadow JSONL and status writes, so observation continues unchanged.
 
 ## Setup
 
-1. Build the bridge binary from the Ensō repo root:
-   `go build -o ~/bin/enso-recall ./cmd/enso-recall` (module
-   `github.com/clockworksoul/enso`).
+1. Build the bridge binaries from the Ensō repo root (module
+   `github.com/clockworksoul/enso`):
+   `go build -o ~/bin/enso-recall ./cmd/enso-recall` and
+   `go build -o ~/bin/enso-mark-recalled ./cmd/enso-mark-recalled`.
 2. Install this extension's own dependencies: `npm install` in this
    directory.
 3. Configure the plugin (all fields optional):
 
 ```jsonc
 {
-  "enabled": true, // false disables observation and injection
+  "enabled": true, // false disables observation, reinforcement, and injection
   "liveRecall": false, // explicit true enables prompt context
   "liveRecallMinScore": 0.5, // finite number in [0,1]
   "corpusRoot": "~/.openclaw/workspace", // dir containing memory/
   "ensoBinary": "~/bin/enso-recall",
+  "markRecalledBinary": "~/bin/enso-mark-recalled", // default: enso-mark-recalled on PATH
   "topK": 5,
   "timeoutMs": 4000,
   "shadowLogDir": "~/.openclaw/workspace/.enso/shadow",
