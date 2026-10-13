@@ -1,7 +1,40 @@
 # Ensō — Current Status
 
-*Single source of truth for where we are and what done looks like. Updated 2026-10-02.*
+*Single source of truth for where we are and what done looks like. Updated 2026-10-13.*
 *Authoritative spec: `docs/2026-06-20-enso-unified-spec.md`. ADRs: `docs/`.*
+
+## Current state — 2026-10-13
+
+**The substrate and both host adapters are implemented. OpenClaw remains in
+shadow mode; Codex defaults to shadow mode and can inject bounded context only
+when explicitly configured for `live`. No OpenClaw slot takeover has been
+approved.**
+
+WP-8's implementation blockers are closed: OpenClaw hooks co-key on `runId`,
+`reply_use` derives a precision-gated material-use label from `llm_output`, and
+`cmd/enso-recall` reuses a persisted KùzuDB index at `<corpus>/.enso/index.kuzu`
+to avoid re-embedding the corpus on each warm call. These changes are shipped
+and locally validated, but not yet validated by a fresh production shadow
+window. The existing Jul 25–Aug 11, 2026 corpus predates these changes and ran
+in degraded lexical mode.
+
+**Remaining work:** collect a fresh shadow window with the current OpenClaw
+adapter and vector path; pair Ensō, flat-file, and `reply_use` records; have a
+human label the divergent turns; then decide whether OpenClaw should give Ensō
+the `memory` slot. Until that review, WP-8 is blocked and slot ownership is
+undecided. The `reply_use` matcher requires a run of at least three distinctive
+shared tokens, so paraphrase reuse can be missed; its verdict includes evidence
+for review. It appends a new record and does not mutate prior log lines.
+
+The OpenClaw extension is already a standalone package under
+`host/openclaw/enso-memory/`; no fork repackaging remains. Codex support is
+implemented under `host/codex/enso-memory/` and is outside the OpenClaw WP-8
+slot decision.
+
+The dated entries below preserve the state and decisions as recorded at those
+times. Where they describe WP-8 blockers or adapter behavior that conflicts with
+this current-state summary, this summary is authoritative; later entries in the
+timeline supersede earlier ones.
 
 ## ⚡ 2026-10-02 (Dross Hour) — WP-8 blocker (a) SHIPPED: the `used` RECALL-DEF signal, derived from `llm_output`
 

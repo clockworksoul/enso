@@ -128,14 +128,16 @@ Capture *detection* — recognizing a correction from a raw utterance — **retu
 
 ## Using Ensō in an OpenClaw deployment
 
-**Honest status: Ensō does not yet serve live recall in any OpenClaw deployment.** The substrate in this repo (core, mdstore, graphstore, decay, capture) is done and tested, but the only host integration that exists today runs in **shadow mode** — it observes and logs, it never answers.
+**Honest status: Ensō does not yet serve live recall in an OpenClaw deployment.** The substrate in this repo (core, mdstore, graphstore, decay, capture) is implemented; the OpenClaw adapter remains **observation-only** — it observes and logs, it never answers or modifies the turn. The Codex adapter is separate and supports explicitly enabled, bounded live context; see [Using Ensō in Codex](#using-ensō-in-codex).
 
 ### What exists now (shadow mode)
 
-- **`cmd/enso-recall`** (this repo): a one-shot, read-only CLI. Given a corpus root and a query, it loads the Markdown corpus, rebuilds the in-memory graph, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It never writes to the corpus.
-- **`host/openclaw/enso-memory`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on `memory_search`) alongside whatever plugin already owns the `memory` slot. For every turn, it spawns `enso-recall` with a hard timeout, and appends one JSONL record comparing Ensō's answer to the flat-file search's answer to a shadow log (`.enso/shadow/YYYY-MM-DD.jsonl`). It never modifies the turn, never claims the `memory` slot, and fails silently (logged, swallowed) on any error or timeout.
+- **`cmd/enso-recall`** (this repo): a one-shot CLI. Given a corpus root and a query, it loads the Markdown corpus, reuses or rebuilds the derived KùzuDB index at `<root>/.enso/index.kuzu`, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It may write that derived index under `.enso/`; it never writes to the canonical Markdown corpus.
+- **`host/openclaw/enso-memory`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on memory tools) alongside whatever plugin already owns the `memory` slot, plus an `llm_output` observer for material-use labeling. Per turn, it invokes `enso-recall` with a hard timeout and appends JSONL records to `.enso/shadow/YYYY-MM-DD.jsonl`. It never modifies the turn or claims the `memory` slot; errors are recorded and swallowed.
 
-That's the entire integration surface today: parallel observation, zero effect on live behavior. It exists to generate the evidence (real divergence cases) that a future slot-takeover decision (WP-8) would need — WP-8 is deliberately left unscoped until that evidence exists.
+The OpenClaw shadow log now records three sides of a turn: Ensō recall, the active plugin's flat-file result, and a `reply_use` label derived from the host's `llm_output` event. The hooks correlate through the host `runId` when available. The label is a precision-gated lexical signal, not a semantic judgment: it requires a shared run of at least three distinctive tokens and is reviewable through its score and evidence. Existing recall and flat-file lines remain append-only with `used: "unknown"`; `reply_use` adds the verdict as a separate record. See the [OpenClaw adapter README](host/openclaw/enso-memory/README.md) for the log schema.
+
+WP-8 remains **blocked on collecting a fresh shadow window** with co-keying, reply-use labels, and the persisted vector index active, then having a human review the paired divergent turns. The Jul 25–Aug 11, 2026 corpus predates these fixes and cannot answer the slot-takeover question.
 
 **Host layout:** plugins live at `host/<host-name>/<plugin-name>/`. `host/openclaw/enso-memory/` contains the OpenClaw shadow adapter; `host/codex/enso-memory/` contains the Codex C0 plugin, which defaults to shadow mode and can inject strictly bounded recall through `UserPromptSubmit` when explicitly switched to live mode. The symmetric two-level layout leaves room for additional plugins under either host without another package move.
 
@@ -150,9 +152,9 @@ That's the entire integration surface today: parallel observation, zero effect o
 
 The substrate is complete; the remaining seams are host-side, each gated on real evidence (RH-2, n ≥ 1):
 
-1. **Repackage the shadow extension** as a standalone installable plugin (no fork dependency) — see the limitation noted above.
-2. **Material-recall telemetry:** the host-side half of Phase-3 measurement — the n=1 constructed divergence case is proven; the corpus-scale number needs live events.
-3. **WP-8 (undefined by design):** after enough shadow-log days accumulate, label the divergent turns and decide whether Ensō takes the `memory` slot.
+1. **Collect a fresh OpenClaw shadow window** with the current adapter and inspect paired recall, flat-file, and `reply_use` records.
+2. **Review divergent turns against the slot-takeover gate.** The lexical `reply_use` heuristic favors precision and can miss paraphrase; inspect its evidence and account for that limitation during labeling.
+3. **Decide OpenClaw slot ownership only from that evidence.** WP-8's decision remains open; no takeover has been made.
 
 ## Using Ensō in Codex
 
