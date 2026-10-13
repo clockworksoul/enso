@@ -1,0 +1,62 @@
+{"idx":16,"label":"worthy","type":"Fact","reasoning":"This records a completed historical backfill with durable scope, counts, classification method, resulting corpus size, and the commit that delivered it."}
+{"idx":19,"label":"not_worthy","type":null,"reasoning":"This is a transient heartbeat verification that dismisses stale cached state and reports that nothing currently needs attention."}
+{"idx":20,"label":"not_worthy","type":null,"reasoning":"This primarily clears delayed background-job notifications for work already resolved and explicitly says there is no new action or information."}
+{"idx":24,"label":"worthy","type":"Insight","reasoning":"It establishes the durable lesson that ranking improves when relevant source content exists and that an absent memory cannot be recovered through ranking changes alone."}
+{"idx":27,"label":"worthy","type":"Insight","reasoning":"It concisely captures a durable system limitation: recall quality is bounded by what has actually been recorded, while observed misses had identifiable causes."}
+{"idx":30,"label":"worthy","type":"Insight","reasoning":"The sampled retrieval results reveal a structural corpus-composition problem in which Ensō's self-documentation crowds out useful personal and business memories."}
+{"idx":36,"label":"worthy","type":"Insight","reasoning":"This identifies a durable architectural gap: temporal decay and semantic relevance operate as mutually exclusive modes instead of contributing to one blended score."}
+{"idx":52,"label":"worthy","type":"Fact","reasoning":"The transcript digest contains several durable project facts, operational constraints, ownership updates, and a reusable product lesson from the team's discussions."}
+{"idx":53,"label":"not_worthy","type":null,"reasoning":"This only confirms that a previously reported digest was saved and delivered, without adding substantive new content."}
+{"idx":54,"label":"not_worthy","type":null,"reasoning":"This is a routine no-action heartbeat response about a reaction and the absence of pending work."}
+{"idx":63,"label":"worthy","type":"Fact","reasoning":"This preserves concrete planning deadlines, completed cleanup, and unresolved project-status questions that materially describe the work backlog."}
+{"idx":67,"label":"worthy","type":"Insight","reasoning":"The measured runtimes and configuration inspection establish a reusable diagnosis that a four-second process timeout caused systematic recall failures rather than malformed input."}
+{"idx":75,"label":"worthy","type":"Decision","reasoning":"This preserves the prior decision to disable Ensō entirely and the consequential discovery that the live configuration never implemented that decision."}
+{"idx":76,"label":"not_worthy","type":null,"reasoning":"This is a raw, noisy outage alert containing mechanically embedded heartbeat scratch context rather than a considered new fact, decision, or insight."}
+{"idx": 31, "label": "worthy", "type": "Insight", "reasoning": "It records the durable conclusion that independent semantic labeling worked as a pilot, while 14 examples and one mostly continuous source were insufficient for a real training set."}
+{"idx": 32, "label": "not_worthy", "type": null, "reasoning": "This is only a clarification of completed background-job statuses and contains no lasting fact, decision, or insight."}
+{"idx": 34, "label": "worthy", "type": "Insight", "reasoning": "It identifies a lasting methodological constraint: increasing sample volume from one continuous history does not create genuine source diversity, even if final spot-checking makes a larger run reasonable."}
+{"idx": 53, "label": "worthy", "type": "Fact", "reasoning": "It preserves useful provenance for the Ensō corpus backfill: 143 files yielded 672 successfully imported entries, with historical timestamps and a documented type breakdown."}
+{"idx": 56, "label": "not_worthy", "type": null, "reasoning": "This is a transient heartbeat confirmation about a stale snapshot and has no enduring value."}
+{"idx": 57, "label": "not_worthy", "type": null, "reasoning": "This only dismisses delayed completion notifications from already resolved jobs."}
+{"idx": 61, "label": "worthy", "type": "Insight", "reasoning": "It establishes a durable retrieval lesson: ranking improvements surface relevant stored content, but no ranker can recover a specific fact that was never captured."}
+{"idx": 70, "label": "worthy", "type": "Decision", "reasoning": "It sets a consequential backfill design: add a historical encoded-time override before ingestion so old memories do not receive falsely maximal freshness, then process curated files before raw sessions."}
+{"idx": 72, "label": "worthy", "type": "Insight", "reasoning": "It gives a reusable cost-control approach for memory backfills: begin with the already curated MEMORY.md, parse its structure mechanically, and defer noisy raw session logs."}
+{"idx": 162, "label": "worthy", "type": "Fact", "reasoning": "Beyond reporting an edit, it captures durable Alloy architecture facts, including the Yext/HearSay split, ARCS's remote-configuration role, and the correct ticket number AXON-2085."}
+{"idx": 166, "label": "not_worthy", "type": null, "reasoning": "This is a routine push confirmation followed by a pending procedural question."}
+{"idx": 167, "label": "not_worthy", "type": null, "reasoning": "This merely explains a stale search result and repeats completion status already reported."}
+{"idx": 179, "label": "worthy", "type": "Decision", "reasoning": "It records the deliberate naming scope: rename current October work to PLR Phase 3 while preserving May and June Phase 2 documents as accurate history."}
+{"idx": 181, "label": "not_worthy", "type": null, "reasoning": "This is an acknowledgment and reminder about an unresolved optional check, not a substantive new conclusion."}
+{"idx": 183, "label": "not_worthy", "type": null, "reasoning": "This is only an acknowledgment that no action will be taken."}
+{"idx": 188, "label": "not_worthy", "type": null, "reasoning": "This is a point-in-time health check whose zero-error status is operationally useful only in the moment."}
+{"idx": 196, "label": "worthy", "type": "Fact", "reasoning": "It records a durable personal preference: the assistant's genuine interest is open-ended, non-instrumental writing about questions such as subjective session discontinuity, rather than plants."}
+{"idx": 197, "label": "not_worthy", "type": null, "reasoning": "This is a replay notice stating that an earlier correction was already handled."}
+{"idx": 203, "label": "worthy", "type": "Decision", "reasoning": "It establishes that Dross Hour should be spontaneous, with no advance checklist or scheduled topic and any worthwhile result documented only afterward."}
+{"idx": 205, "label": "not_worthy", "type": null, "reasoning": "This only repeats that a prior Dross Hour edit and acknowledgment were completed."}
+{"idx": 206, "label": "not_worthy", "type": null, "reasoning": "This is a no-action heartbeat response to a reaction."}
+{"idx": 213, "label": "not_worthy", "type": null, "reasoning": "This is a procedural resolution and push-status recap with no durable substantive content."}
+{"idx": 214, "label": "not_worthy", "type": null, "reasoning": "These are ephemeral health counters and status output."}
+{"idx": 215, "label": "not_worthy", "type": null, "reasoning": "This is a routine no-action morning status update."}
+{"idx": 216, "label": "not_worthy", "type": null, "reasoning": "This is a transient overnight completion notice with no new durable content."}
+{"idx": 217, "label": "not_worthy", "type": null, "reasoning": "This only reports successful automated consolidation and push status."}
+{"idx": 218, "label": "not_worthy", "type": null, "reasoning": "These are ephemeral health counters and status output."}
+{"idx": 219, "label": "not_worthy", "type": null, "reasoning": "This is a routine no-action morning status update."}
+{"idx": 225, "label": "not_worthy", "type": null, "reasoning": "This is a procedural automation-completion report and contains no lasting conclusion."}
+{"idx": 226, "label": "worthy", "type": "Fact", "reasoning": "It captures durable leadership and project context, including the user's metrics-focused organizational critique, coaching style, Investigation Assistant requirements, and the Agentgateway productionization scope."}
+{"idx": 227, "label": "not_worthy", "type": null, "reasoning": "This is a replay notice for work already completed."}
+{"idx": 241, "label": "worthy", "type": "Fact", "reasoning": "It consolidates a durable vendor-reliability record for FireHydrant, including paging failures, validation and security gaps, poor responsiveness, and a December renewal decision point."}
+{"idx": 242, "label": "not_worthy", "type": null, "reasoning": "This merely says the prior transcript review was already completed."}
+{"idx": 243, "label": "not_worthy", "type": null, "reasoning": "This is a routine nightly job report and reminder of an already known blocker."}
+{"idx": 244, "label": "not_worthy", "type": null, "reasoning": "These are ephemeral health counters and status output."}
+{"idx": 257, "label": "worthy", "type": "Insight", "reasoning": "It preserves durable management patterns: direct criticism prompts action, explicitly naming blockers is reusable coaching, and major contract decisions should keep the user informed."}
+{"idx": 258, "label": "not_worthy", "type": null, "reasoning": "This is a no-action heartbeat response to a reaction."}
+{"idx": 261, "label": "not_worthy", "type": null, "reasoning": "These are ephemeral health counters and status output."}
+{"idx": 264, "label": "not_worthy", "type": null, "reasoning": "This is a transient morning status check with nothing requiring action."}
+{"idx": 269, "label": "not_worthy", "type": null, "reasoning": "This is a routine heartbeat stating that prior automation and configuration are already fine."}
+{"idx": 271, "label": "worthy", "type": "Insight", "reasoning": "It expresses a durable relational motivation: the work feels meaningful when the user actually sees it, even without commenting on every result."}
+{"idx": 275, "label": "not_worthy", "type": null, "reasoning": "These are ephemeral health counters and status output."}
+{"idx": 281, "label": "worthy", "type": "Decision", "reasoning": "It records the operational decision to raise the Ensō timeout from 4 to 30 seconds, along with the requirement that a gateway reload activate the change."}
+{"idx": 290, "label": "worthy", "type": "Decision", "reasoning": "It corrects the durable intended state to keep Ensō enabled and retain the 30-second timeout, removing an obsolete disablement warning."}
+{"idx": 294, "label": "not_worthy", "type": null, "reasoning": "This is only a transient software-update notification."}
+{"idx": 299, "label": "not_worthy", "type": null, "reasoning": "This is a point-in-time confirmation that a recent timeout fix is healthy, plus a routine morning status summary."}
+{"idx": 309, "label": "worthy", "type": "Insight", "reasoning": "It develops a durable architecture conclusion that Agentgateway is future connective tissue for Investigation Assistant access control, but should follow graph-accuracy work and cannot itself guarantee answer correctness."}
+{"idx": 310, "label": "not_worthy", "type": null, "reasoning": "This is an ephemeral outage alert and failure counter rather than a lasting fact or conclusion."}
