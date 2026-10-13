@@ -64,6 +64,10 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "print the formatted block(s) without writing")
 	flag.Parse()
 
+	// Markdown property values must occupy a single line. Normalize before
+	// validation and ID generation so multiline input cannot break the block.
+	*content = singleLine(*content)
+
 	if *root == "" {
 		log.Fatal("enso-append: -root is required")
 	}
@@ -164,7 +168,13 @@ func main() {
 	}
 }
 
-// splitList splits a comma-separated string into a trimmed slice. Returns nil
+// singleLine collapses all whitespace runs, including Unicode whitespace,
+// to single spaces and removes leading/trailing whitespace.
+func singleLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// splitList splits a comma-separated string into a normalized single-line slice. Returns nil
 // (not empty slice) when the input is blank so callers can distinguish
 // "not provided" from "explicitly empty". NewEntry normalises nil → [].
 func splitList(s string) []string {
@@ -175,7 +185,7 @@ func splitList(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
+		if t := singleLine(p); t != "" {
 			out = append(out, t)
 		}
 	}
