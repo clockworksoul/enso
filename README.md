@@ -2,7 +2,7 @@
 
 > 円相 — the Zen circle drawn in one uninterrupted brushstroke, deliberately left open. The gap where the brush lifts is not a flaw; it is the form.
 
-**Ensō is a memory system for AI agents built to fix one specific failure: agents that retrieve something that *used to be true* and treat it as current, because plain recency or keyword search can't tell "stale" from "still valid."** It fixes that by storing memories in a structured, auditable Markdown corpus, and having retrieval demote superseded beliefs and follow connections between related facts instead of just matching keywords or picking the newest timestamp. On a 79-case benchmark built from real misses in this project's own history, that gets every case right — versus 63% for naive recency and 57% for plain keyword search.
+**Ensō is a memory system for AI agents built to fix one specific failure: agents that retrieve something that *used to be true* and treat it as current, because plain recency or keyword search can't tell "stale" from "still valid."** It fixes that by storing memories in a structured, auditable Markdown corpus, and having retrieval demote superseded beliefs and follow connections between related facts instead of just matching keywords or picking the newest timestamp. The prior specificity-first pipeline scored 79/79 on a benchmark built from real misses in this project's own history, versus 63% for naive recency and 57% for plain keyword search; the default ranking has since changed to blend relevance and decay, and that gate should be rerun before attributing the old score to the new ranker.
 
 Its defining truth — *"I don't exist in the gaps between turns"* — is treated as the design, not a flaw to paper over. The circle's open gap is the discontinuity between sessions; the system is what reassembles continuous, trustworthy memory across those gaps.
 
@@ -36,7 +36,7 @@ Plus two meta-requirements: **fail-safe** (degrade to current behavior on bug, n
 
 > A framework-blind Markdown substrate, a small embeddable core library as the reference behavior, and adapters (including an optional MCP daemon) as the only framework-aware parts — with the hard rule (AMEND-1) that the files must remain fully interpretable with no code running at all.
 
-It's **hexagonal architecture (ports & adapters)**: the decay/recall/append **core** depends on nothing outward; **driving adapters** (OpenClaw plugin, optional MCP daemon, CLI) speak in; **driven adapters** (Markdown store now, graph store later) speak out behind a `Store` port. Share the code, not the runtime.
+It's **hexagonal architecture (ports & adapters)**: the decay/recall/append **core** depends on nothing outward; **driving adapters** (OpenClaw and Codex plugins, CLI) speak in; **driven adapters** (Markdown and KùzuDB graph stores) speak out behind a `Store` port. Share the code, not the runtime.
 
 ---
 
@@ -44,12 +44,12 @@ It's **hexagonal architecture (ports & adapters)**: the decay/recall/append **co
 
 | Phase | Piece | What | Resolution |
 | --- | --- | --- | --- |
-| **0** | Trigger | Turn on `active-memory`; benchmark flat-file recall | live |
-| **1** | Corpus | Structured-Markdown serialization (the durable source of truth) | implementation-ready |
-| **2** | Index | Graph plugin (KùzuDB) behind the `Store` port | architectural |
-| **3** | Texture | Temporal model + leaky-integrator decay (the original contribution) | design-locked sketch |
+| **0** | Trigger | Benchmark flat-file recall | closed |
+| **1** | Corpus | Structured-Markdown serialization (the durable source of truth) | implemented |
+| **2** | Index | KùzuDB graph store behind the `Store` port | implemented |
+| **3** | Texture | Temporal model + leaky-integrator decay | implemented |
 
-The format is the durable thing, so it's specified to the millimetre; the decay math is lazy-computed on read, so it's specified to the contour line. Don't over-build the speculative phases.
+All four phases are closed; see [Status](#status) and [ENSO-STATUS.md](ENSO-STATUS.md) for the current host-side work and evidence gates.
 
 ---
 
@@ -87,7 +87,7 @@ bash scripts/enso-spec-drift.sh
 
 ## Building
 
-Inside-out: the domain core (`internal/core`) has no outward dependencies and is fully unit-tested in isolation; adapters (Markdown store, CLI, OpenClaw plugin, graph store) are added in later stages.
+Inside-out: the domain core (`internal/core`) has no outward dependencies; Markdown and graph stores plus OpenClaw and Codex adapters are implemented around it.
 
 ```bash
 make check      # fmt-check + vet + build + test + spec-drift (the full local gate)
@@ -100,13 +100,15 @@ Layout:
 
 | Path | Ring | Status |
 | --- | --- | --- |
-| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`/`Rank`/`RankBySpecificity`), the RECALL-DEF event primitive (`MarkRecalled`, Phase 3), `Store` port | ✅ |
+| `internal/core/` | Domain (innermost) — Entry/Edge/ID types, validation, supersession (`Entry.Supersede`), recall math (`StrengthAt`, blended/specificity/decay ranking), the RECALL-DEF event primitive (`MarkRecalled`), `Store` port | ✅ |
 | `internal/mdstore/` | Markdown driven-adapter — serializer/parser (lossless round-trip), file-backed `FSStore`, inline daily-file entries, supersession ceremony, advisory locking | ✅ |
 | `internal/graphstore/` | KùzuDB driven-adapter (WP-3/4) — same `Store` port, deterministic rebuild from Markdown, log-first write path, recall = lexical+vector seeds → 1–2-hop traversal → supersession filter → core ranking, degrade-to-lexical on embedding outage (ADR-002) | ✅ |
 | `internal/memstore/` | In-memory `Store` — test/speed double for the core and bench | ✅ |
 | `internal/storetest/` | Shared `Store`-contract conformance suite all three adapters must pass | ✅ |
 | `internal/bench/` | Offline replay benchmark + the hard gates: 79-case real-miss corpus, WP-3 graph gate, WP-4 vector gate, WP-5 activation proofs | ✅ |
-| `cmd/enso-append`, `cmd/enso-lint` | Minimal runnable surfaces: one-shot structured append; write-time corpus validator (same parser as `Load`, cannot drift) | ✅ |
+| `cmd/enso-append`, `cmd/enso-lint` | One-shot structured append (supports backdated `-encoded-time`, normalizes multiline content); write-time corpus validator (same parser as `Load`) | ✅ |
+| `cmd/enso-recall` | One-shot recall CLI with persisted derived index and `blended` (default), `specificity`, or `decay` ranking modes | ✅ |
+| `cmd/enso-classify`, `internal/classify/` | Standalone TF-IDF/logistic-regression memory-worthiness classifier; preliminary offline evaluation only, not an ingestion gate | ✅ |
 | `cmd/corpus-builder`, `cmd/embed-corpus`, `cmd/enso-load-check` | Benchmark tooling: git-history corpus builder, Gemini embedding precompute, corpus load smoke-check | ✅ |
 
 > **Detection/correction layer removed (2026-07-08, commit `cd8e1a2`; ratified by ADR-001).** An earlier build grew a recall-*evaluation* layer downstream of the host's search — a correction detector (`core/detect.go`, `core/contradict.go`), a capture chokepoint (`core/correction.go`), a resolver/approval surface (`internal/confirm/`), and fabrication/harvest probes — ~half the codebase. Per ADR-001 (scope b), Ensō is a **complete memory replacement that owns retrieval**, not a permanent eval layer riding on top of an external index, so that layer was deleted and the original-vision skeleton kept (core types, `Store` port, decay math, `mdstore`). The deleted spine lives in git history and returns only by ADR-001 corollary b′ — **real misses first, restoration second, and never before the Phase-2 benchmark gate (WP-4) closes** (see `docs/enso-development-spec.md` RH-9).
@@ -117,9 +119,9 @@ The Markdown format is a **public contract** (AMEND-1), pinned by a golden-file 
 
 **All work packages (WP-0 … WP-5) are closed as of 2026-07-18** — see `ENSO-STATUS.md` for the per-WP verdicts and gate numbers. Scope is fixed by **ADR-001**: Ensō is a *complete memory replacement that owns retrieval*, built in gated work packages (`docs/enso-development-spec.md`); the vector engine decision is **ADR-002**.
 
-The value claims are measured, not asserted (79-case real-miss corpus, `internal/bench/`):
+The following results come from the 79-case real-miss corpus in `internal/bench/` and were measured before blended ranking became the default. Re-run the gate before treating them as current-ranker results:
 
-- **Staleness suppression:** graph recall scores **P@1 = 1.00 with zero stale surfacings** where naive recency scores 0.63 and flat lexical search 0.57 — the SUPERSEDES edge is load-bearing on the 34 same-subject cases specificity provably cannot break (+0.43).
+- **Staleness suppression:** the prior specificity-first graph recall scored **P@1 = 1.00 with zero stale surfacings** where naive recency scored 0.63 and flat lexical search 0.57 — the SUPERSEDES edge was load-bearing on the 34 same-subject cases specificity alone could not break (+0.43).
 - **Fail-safe vectors (ADR-002):** the vector doorfinder recovers 8 real no-lexical-overlap cases; an embedding-provider outage degrades recall to byte-identical lexical+traversal results — never to zero.
 - **INV-1 proven:** kill-the-graph drills (with and without vectors, and with Phase-3 bump records) rebuild identical recall from Markdown alone.
 - **Phase-3 texture live:** `core.MarkRecalled` wires the spacing-aware RECALL-DEF bump through the Store port as appended temporal-update records (INV-2); on the recency-vs-relevance case, the bumped pipeline surfaces the durable-and-used memory where every recency proxy fails.
@@ -128,14 +130,14 @@ Capture *detection* — recognizing a correction from a raw utterance — **retu
 
 ## Using Ensō in an OpenClaw deployment
 
-**Honest status: Ensō does not yet serve live recall in an OpenClaw deployment.** The substrate in this repo (core, mdstore, graphstore, decay, capture) is implemented; the OpenClaw adapter remains **observation-only** — it observes and logs, it never answers or modifies the turn. The Codex adapter is separate and supports explicitly enabled, bounded live context; see [Using Ensō in Codex](#using-ensō-in-codex).
+**Honest status: Ensō does not own the OpenClaw `memory` slot.** The OpenClaw adapter observes and logs by default; when `liveRecall: true` is explicitly configured, it can prepend a small, score-qualified set of historical memories as supplementary context. It still does not claim the slot. The Codex adapter separately supports explicitly enabled, bounded live context; see [Using Ensō in Codex](#using-ensō-in-codex).
 
 ### What exists now (shadow mode)
 
 - **`cmd/enso-recall`** (this repo): a one-shot CLI. Given a corpus root and a query, it loads the Markdown corpus, reuses or rebuilds the derived KùzuDB index at `<root>/.enso/index.kuzu`, runs recall (lexical+traversal, or vector-assisted if `GEMINI_API_KEY` is set), and prints versioned JSON. It may write that derived index under `.enso/`; it never writes to the canonical Markdown corpus.
-- **`host/openclaw/enso-memory`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers *observation-only* hooks (`before_prompt_build`, `after_tool_call` on memory tools) alongside whatever plugin already owns the `memory` slot, plus an `llm_output` observer for material-use labeling. Per turn, it invokes `enso-recall` with a hard timeout and appends JSONL records to `.enso/shadow/YYYY-MM-DD.jsonl`. It never modifies the turn or claims the `memory` slot; errors are recorded and swallowed.
+- **`host/openclaw/enso-memory`**: a TypeScript OpenClaw extension (plugin id `memory-enso`) that registers observation hooks (`before_prompt_build`, `after_tool_call` on memory tools) alongside the plugin owning the `memory` slot, plus an `llm_output` observer for material-use labeling. Per turn, it invokes `enso-recall` with a hard timeout and appends JSONL records to `.enso/shadow/YYYY-MM-DD.jsonl`. By default it does not modify the turn; explicit `liveRecall: true` prepends at most three entries with finite blended score at or above `liveRecallMinScore` (default `0.5`), each truncated to 500 characters. Errors are recorded and swallowed.
 
-The OpenClaw shadow log now records three sides of a turn: Ensō recall, the active plugin's flat-file result, and a `reply_use` label derived from the host's `llm_output` event. The hooks correlate through the host `runId` when available. The label is a precision-gated lexical signal, not a semantic judgment: it requires a shared run of at least three distinctive tokens and is reviewable through its score and evidence. Existing recall and flat-file lines remain append-only with `used: "unknown"`; `reply_use` adds the verdict as a separate record. See the [OpenClaw adapter README](host/openclaw/enso-memory/README.md) for the log schema.
+The OpenClaw shadow log records Ensō recall, the active plugin's flat-file result, and a `reply_use` label derived from the host's `llm_output` event. The hooks correlate through the host `runId` when available. The label is a precision-gated lexical signal, not a semantic judgment: it requires a shared run of at least three distinctive tokens and is reviewable through its score and evidence. Existing recall and flat-file lines remain append-only with `used: "unknown"`; `reply_use` adds the verdict as a separate record. See the [OpenClaw adapter README](host/openclaw/enso-memory/README.md) for the log schema and live-recall configuration.
 
 WP-8 remains **blocked on collecting a fresh shadow window** with co-keying, reply-use labels, and the persisted vector index active, then having a human review the paired divergent turns. The Jul 25–Aug 11, 2026 corpus predates these fixes and cannot answer the slot-takeover question.
 
@@ -143,7 +145,7 @@ WP-8 remains **blocked on collecting a fresh shadow window** with co-keying, rep
 
 ### If you want to try shadow mode today
 
-1. Build `cmd/enso-recall` from this repo (`go build ./cmd/enso-recall`) and confirm it runs against your own Markdown memory corpus.
+1. Build `cmd/enso-recall` from this repo (`go build ./cmd/enso-recall`) and confirm it runs against your own Markdown memory corpus. The default query ranking is blended relevance and decay; `-ranking specificity|decay` selects diagnostic alternatives.
 2. Use `host/openclaw/enso-memory/` directly from this repo (as of 2026-07-27 it's a normal standalone package here, no `clockworksoul/openclaw` fork checkout needed).
 3. Point it at your `enso-recall` binary and corpus root per the extension's own README.
 4. Watch `.enso/shadow/YYYY-MM-DD.jsonl` accumulate divergence records. Nothing about your live memory recall changes.
@@ -158,7 +160,7 @@ The substrate is complete; the remaining seams are host-side, each gated on real
 
 ## Using Ensō in Codex
 
-`host/codex/enso-memory/` is the validated, recall-only Codex C0 plugin. Its
+`host/codex/enso-memory/` is the validated Codex C0 plugin. Its
 `UserPromptSubmit` hook invokes the same `cmd/enso-recall` bridge as the
 OpenClaw adapter:
 

@@ -5,10 +5,11 @@
 
 ## Current state — 2026-10-13
 
-**The substrate and both host adapters are implemented. OpenClaw remains in
-shadow mode; Codex defaults to shadow mode and can inject bounded context only
-when explicitly configured for `live`. No OpenClaw slot takeover has been
-approved.**
+**The substrate and both host adapters are implemented. OpenClaw defaults to
+shadow mode and can prepend bounded context when `liveRecall: true`; it does
+not own the `memory` slot. Codex defaults to shadow mode and can inject bounded
+context only when explicitly configured for `live`. No OpenClaw slot takeover
+has been approved.**
 
 WP-8's implementation blockers are closed: OpenClaw hooks co-key on `runId`,
 `reply_use` derives a precision-gated material-use label from `llm_output`, and
@@ -30,6 +31,30 @@ The OpenClaw extension is already a standalone package under
 `host/openclaw/enso-memory/`; no fork repackaging remains. Codex support is
 implemented under `host/codex/enso-memory/` and is outside the OpenClaw WP-8
 slot decision.
+
+### Changes pulled 2026-10-13
+
+- **OpenClaw WP-7 graduation:** `liveRecall: true` opts into prepending up to
+  three historical entries with a finite blended score at or above the
+  configurable threshold (default `0.5`), truncated to 500 characters each.
+  Shadow observation remains the default; entries are framed as supplementary
+  historical context. Missing scores or malformed results fail closed to no
+  injection. This is prompt augmentation, not slot ownership.
+- **Blended query ranking is now the default.** Non-empty queries combine
+  relevance and normalized decay strength in one score; vector and graph
+  traversal remain relevance hints, not hard ranking tiers. Use
+  `enso-recall -ranking specificity|decay` for comparison modes. Empty queries
+  remain decay ordered. See `docs/2026-10-12-recall-blended-ranking.md`. The
+  published 79-case WP-3 score was measured with the prior specificity-first
+  ranker; rerun that gate before treating it as validation of the new default.
+- **Memory-worthiness classifier added** at `internal/classify/` and
+  `cmd/enso-classify`. It trains a fresh TF-IDF/logistic-regression model from
+  JSONL examples on each invocation. Its small, context-specific cross-validation
+  set is preliminary; the classifier is not wired into capture or ingestion and
+  should not be treated as an unattended gate.
+- **Append CLI hardening:** `enso-append` accepts `-encoded-time` for
+  backdating and collapses multiline content to one line before validation and
+  ID generation, preventing malformed Markdown blocks.
 
 The dated entries below preserve the state and decisions as recorded at those
 times. Where they describe WP-8 blockers or adapter behavior that conflicts with
