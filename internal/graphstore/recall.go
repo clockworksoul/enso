@@ -43,14 +43,11 @@ var traversalRels = []core.EdgeType{core.EdgeRelatesTo, core.EdgeOwns, core.Edge
 // deeper is query-language cleverness the WP's non-goals prohibit.
 const maxHops = 2
 
-// Doorfinder affinities are minimum relevance values for non-lexical hits.
-// Vector similarity is direct query evidence; undirected graph adjacency is a
-// deliberately lighter signal because traversal can also walk from a precise
-// child back to its vague parent.
-const (
-	vectorAffinity    = 0.50 // TUNABLE — vector-seed relevance floor
-	traversalAffinity = 0.05 // TUNABLE — graph-only relevance floor
-)
+// Graph adjacency supplies a minimum relevance for traversal hits. Unlike
+// vector seeds, which carry their actual cosine similarity, undirected reach
+// has no continuous similarity measure and can walk from a precise child back
+// to its vague parent, so it supplies a deliberately lighter signal.
+const traversalAffinity = 0.05 // TUNABLE — graph-only relevance floor
 
 // RankingMode selects how current entries are ordered after recall filtering.
 type RankingMode string
@@ -179,14 +176,15 @@ func (g *GraphStore) RecallWithOptions(ctx context.Context, query string, now ti
 	// SEED (vector, WP-4) — the doorfinder. Failure at any step degrades to
 	// the lexical pipeline and reports itself; it never empties the answer.
 	var degraded error
-	vectorSet := map[core.ID]bool{}
+	vectorSet := map[core.ID]float64{}
 	if g.embedder != nil {
 		vecSeeds, err := g.vectorSeeds(ctx, query, kept)
 		if err != nil {
 			mode, degraded = ModeDegraded, err
 		} else {
-			for _, id := range vecSeeds {
-				vectorSet[id] = true
+			for _, seed := range vecSeeds {
+				id := seed.id
+				vectorSet[id] = seed.sim
 				if !seedSet[id] {
 					seedSet[id] = true
 					seeds = append(seeds, id)
@@ -230,8 +228,8 @@ func (g *GraphStore) RecallWithOptions(ctx context.Context, query string, now ti
 		for id := range reachedSet {
 			supplemental[id] = traversalAffinity
 		}
-		for id := range vectorSet {
-			supplemental[id] = vectorAffinity
+		for id, sim := range vectorSet {
+			supplemental[id] = sim
 		}
 		ranked = core.RankByBlend(kept, terms, supplemental, now)
 	case RankingSpecificity:
@@ -272,9 +270,15 @@ func latestByID(entries []core.Entry) []core.Entry {
 	return out
 }
 
-// vectorSeeds embeds the query and returns the ids of the top-vectorSeedK
-// current entries whose stored content vectors clear vectorMinSim.
-func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.Entry) ([]core.ID, error) {
+type vectorSeed struct {
+	id  core.ID
+	sim float64
+}
+
+// vectorSeeds embeds the query and returns the top-vectorSeedK current entries
+// whose stored content vectors clear vectorMinSim, with their cosine scores.
+// The threshold gates seed inclusion; the score supplies continuous relevance.
+func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.Entry) ([]vectorSeed, error) {
 	qvec, err := g.embedder.Embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
@@ -290,11 +294,7 @@ func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.
 		return nil, err
 	}
 
-	type scored struct {
-		id  core.ID
-		sim float64
-	}
-	var matches []scored
+	var matches []vectorSeed
 	seen := map[core.ID]bool{}
 	for _, e := range kept {
 		if seen[e.ID] {
@@ -306,7 +306,7 @@ func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.
 			continue // record has no vector (embed failed at append; rebuild heals)
 		}
 		if sim := Cosine(qvec, vec); sim >= vectorMinSim {
-			matches = append(matches, scored{id: e.ID, sim: sim})
+			matches = append(matches, vectorSeed{id: e.ID, sim: sim})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
@@ -318,11 +318,7 @@ func (g *GraphStore) vectorSeeds(ctx context.Context, query string, kept []core.
 	if len(matches) > vectorSeedK {
 		matches = matches[:vectorSeedK]
 	}
-	out := make([]core.ID, len(matches))
-	for i, m := range matches {
-		out[i] = m.id
-	}
-	return out, nil
+	return matches, nil
 }
 
 // Neighbors returns the ids of memory records reachable within maxHops of any

@@ -2,11 +2,89 @@ package graphstore
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/clockworksoul/enso/internal/core"
 )
+
+// Qualifying vector matches must retain their cosine magnitude through the
+// blended ranker, including when traversal also reaches the same entries.
+func TestRecallBlendedUsesVectorSimilarity(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	const query = "semantic query"
+	fixtures := []struct {
+		label string
+		sim   float64
+		want  float64
+	}{
+		{"weaker", 0.65, 0.65}, // First in corpus: a flat floor would tie.
+		{"stronger", 0.95, 0.95},
+		{"below-gate", 0.59, 0},
+		{"traversed", 0.10, traversalAffinity},
+	}
+	var entries []core.Entry
+	vectors := map[string][]float64{query: {1, 0}}
+	for _, f := range fixtures {
+		id, err := core.NewID(now, f.label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := core.NewEntry(core.NewEntryParams{
+			ID: id, Type: core.TypeFact, Content: f.label, EncodedTime: now,
+			Confidence: core.ConfHigh, Tags: []string{}, About: []string{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, e)
+		vectors[e.Content] = []float64{f.sim, math.Sqrt(1 - f.sim*f.sim)}
+	}
+	edges := []core.Edge{
+		{From: entries[1].ID, To: string(entries[0].ID), Type: core.EdgeRelatesTo},
+		{From: entries[1].ID, To: string(entries[3].ID), Type: core.EdgeRelatesTo},
+	}
+	g, err := OpenRebuiltWith(ctx, "", MapEmbedder{Vectors: vectors}, entries, edges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	rr, err := g.Recall(ctx, query, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr.Mode != ModeVector || len(rr.Ranked) != len(entries) {
+		t.Fatalf("mode=%s, results=%d; want vector mode and all %d entries", rr.Mode, len(rr.Ranked), len(entries))
+	}
+	byID := make(map[core.ID]core.ScoredEntry, len(rr.Ranked))
+	for _, r := range rr.Ranked {
+		byID[r.Entry.ID] = r
+	}
+	for i, f := range fixtures {
+		r, ok := byID[entries[i].ID]
+		if !ok {
+			t.Fatalf("missing %s", f.label)
+		}
+		if r.Specificity != 0 {
+			t.Fatalf("%s specificity=%g; fixture must have no lexical match", f.label, r.Specificity)
+		}
+		if math.Abs(r.Relevance-f.want) > 1e-12 {
+			t.Errorf("%s relevance=%g, want %g", f.label, r.Relevance, f.want)
+		}
+		// All entries have equal, full strength: cosine alone differentiates
+		// the two seeds, while below-gate entries retain no vector evidence.
+		wantScore := 0.60*f.want + 0.40
+		if math.Abs(r.Score-wantScore) > 1e-12 {
+			t.Errorf("%s score=%g, want %g", f.label, r.Score, wantScore)
+		}
+	}
+	strong, weak := byID[entries[1].ID], byID[entries[0].ID]
+	if rr.Ranked[0].Entry.ID != strong.Entry.ID || strong.Score-weak.Score < 0.17 {
+		t.Fatalf("cosine difference lost: stronger score=%g, weaker score=%g, order=%v", strong.Score, weak.Score, rankedIDs(rr))
+	}
+}
 
 func openWithCorpus(t *testing.T) (*GraphStore, []core.Entry, []core.Edge) {
 	t.Helper()

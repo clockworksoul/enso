@@ -21,12 +21,19 @@ The default non-empty-query path now ranks every current entry on one score:
 score = 0.60 * relevance + 0.40 * (StrengthAt(entry, now) / SCap)
 ```
 
-Lexical relevance is `Specificity`. Vector seeds get a relevance floor of
-`0.50`; graph-only reached entries get a lighter `0.05` floor because
-undirected traversal can also walk from a precise child back to a vague parent.
-These preserve both doorfinders without making reach a hard ordering tier. The
-two blend weights and both floors are marked `// TUNABLE`; these are explicit
-priors for benchmark calibration.
+Lexical relevance is `Specificity`. Vector seeds supply their actual cosine
+similarity as a relevance floor; graph-only reached entries get a lighter
+`0.05` floor because undirected traversal can also walk from a precise child
+back to a vague parent. These preserve both doorfinders without making reach
+a hard ordering tier. The two blend weights and the traversal floor are marked
+`// TUNABLE`; these are explicit priors for benchmark calibration.
+
+The 2026-10-13 correction replaces the original flat `0.50` vector floor,
+which erased differences between qualifying vector matches. `vectorMinSim`
+remains a hard seed gate at `0.60`, and only the top `vectorSeedK` matches
+seed traversal and supply vector relevance. Relevance is the maximum of
+lexical specificity and supplemental evidence, so stronger lexical matches
+still win over weaker vector evidence.
 
 The convex score keeps both inputs on `[0,1]`. Strong structural matches still
 count heavily, while a fresh entry can overcome a weak incidental content
