@@ -23,6 +23,7 @@ export type EnsoRecallResult = {
   // Older schema-v1 binaries omit this; they remain observable but cannot
   // qualify for live injection without a finite blended score.
   score?: number;
+  relevance?: number;
 };
 
 export type EnsoRecallOutput = {

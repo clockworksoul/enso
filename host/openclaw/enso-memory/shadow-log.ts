@@ -62,8 +62,19 @@ export type ShadowRecord = {
     elapsed_ms: number;
     spawn_ms: number;
     corpus_entries: number;
-    results: Array<{ id: string; specificity: number; strength: number }>;
+    results: Array<{
+      id: string;
+      specificity: number;
+      strength: number;
+      relevance?: number;
+      score?: number;
+    }>;
   };
+  /** Live context decision for this recall; absent on older log lines. */
+  injected?: boolean;
+  injected_ids?: string[];
+  min_score?: number;
+  live_recall?: boolean;
   /** Flat-file side: a bounded summary of what memory_search returned. */
   flatfile?: {
     tool: string;
