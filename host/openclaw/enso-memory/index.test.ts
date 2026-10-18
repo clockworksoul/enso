@@ -436,6 +436,64 @@ describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)"
     await hooks.get("llm_output")?.({ runId, sessionId: "sess-1", assistantTexts }, {});
   }
 
+  it.each([
+    "The recall block above your message was the internal-context envelope note, the Dross reconciliation, and the Night Shift entry. None of them was relevant.",
+    `the plugin credited the note about the "internal context envelope" bug as materially used in my last reply and marked it ... my reply mentioned that note only to say it wasn't relevant`,
+  ])("does not reinforce a dismissed or meta-discussed topic: %s", async (reply) => {
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([{
+      id: "mem:2026-08-10-hold-bug-report-internal-context-envelope",
+      content: "Matt decided on 2026-08-10 to hold off filing an OpenClaw bug report about the internal context envelope pending a verified repro.",
+    }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary });
+    await runTurn(hooks, "topic-mention", "What was recalled?", [reply]);
+    expect(readRecords(shadowLogDir).find((r) => r.kind === "reply_use"))
+      .toMatchObject({ used: "no", reply_use: [{ used: "no", score: 0 }] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { prompt: "What was decided?", reply: "Filing was held pending a verified repro.", used: "yes" },
+    { prompt: "Was it pending a verified repro?", reply: "It was pending a verified repro.", used: "no" },
+    { prompt: "What was decided?", reply: "Pending a verified repro is not relevant.", used: "no" },
+  ])("labels $used and reinforces accordingly: $reply", async ({ prompt, reply, used }) => {
+    const shadowLogDir = tmpDir();
+    const id = "mem:2026-08-10-hold-bug-report-internal-context-envelope";
+    const ensoBinary = fakeBridge([{
+      id,
+      content: "Matt decided on 2026-08-10 to hold off filing an OpenClaw bug report about the internal context envelope pending a verified repro.",
+    }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary });
+    await runTurn(hooks, "decision", prompt, [reply]);
+    const record = readRecords(shadowLogDir).find((r) => r.kind === "reply_use");
+    expect(record).toMatchObject({
+      used,
+      reply_use: [{ id, used, score: used === "yes" ? 3 : 0 }],
+    });
+    expect(record?.reply_use?.[0]?.evidence).toBe(used === "yes" ? "pending verified repro" : undefined);
+    // Prompt tokens and memory content never become new persistent fields.
+    expect(record).not.toHaveProperty("promptTokens");
+    expect(JSON.stringify(record)).not.toContain("Matt decided");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).toHaveBeenCalledTimes(used === "yes" ? 1 : 0);
+  });
+
+  it("isolates prompt exclusions by runId and consumes them with the recalled memories", async () => {
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([{ id: "mem:test", content: "pending verified repro" }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary });
+    await hooks.get("before_prompt_build")?.({ prompt: "pending verified repro" }, { runId: "echo" });
+    await hooks.get("before_prompt_build")?.({ prompt: "What was decided?" }, { runId: "novel" });
+    for (const runId of ["echo", "novel"]) {
+      await hooks.get("llm_output")?.({ runId, assistantTexts: ["pending verified repro"] }, {});
+    }
+    expect(readRecords(shadowLogDir).filter((r) => r.kind === "reply_use").map((r) => [r.turn, r.used]))
+      .toEqual([["echo", "no"], ["novel", "yes"]]);
+    await runTurn(hooks, "echo", "What was decided?", ["pending verified repro"]);
+    expect(readRecords(shadowLogDir).filter((r) => r.kind === "reply_use").at(-1)?.used).toBe("yes");
+  });
+
   it("END TO END: marks only materially used memories with the corpus root and id", async () => {
     const shadowLogDir = tmpDir();
     const corpusRoot = tmpDir();
@@ -527,7 +585,7 @@ const timer = setInterval(() => {
       .toContain("unexpected spawn failure");
   });
 
-  it("END TO END: labels a materially-used memory yes and an unused one no", async () => {
+  it("END TO END: excludes prompt echoes leaving fewer than MIN_RUN novel tokens", async () => {
     const shadowLogDir = tmpDir();
     const ensoBinary = fakeBridge([
       { id: "mem:2026-09-20-omega", content: "Omega livetopology aggregate rewrite shipped" },
@@ -546,10 +604,10 @@ const timer = setInterval(() => {
     expect(replyUse).toBeDefined();
     expect(replyUse?.turn).toBe("run-1");
     expect(replyUse?.turn_src).toBe("runId");
-    expect(replyUse?.used).toBe("yes"); // at least one memory was used
+    expect(replyUse?.used).toBe("no"); // only two tokens beyond the prompt and slug
     const byId = Object.fromEntries((replyUse?.reply_use ?? []).map((v) => [v.id, v]));
-    expect(byId["mem:2026-09-20-omega"]?.used).toBe("yes");
-    expect(byId["mem:2026-09-20-omega"]?.evidence).toContain("livetopology");
+    expect(byId["mem:2026-09-20-omega"]?.used).toBe("no");
+    expect(byId["mem:2026-09-20-omega"]?.evidence).toBeUndefined();
     expect(byId["mem:2026-03-20-owen"]?.used).toBe("no"); // never mentioned in the reply
   });
 

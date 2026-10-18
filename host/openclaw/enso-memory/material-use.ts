@@ -31,7 +31,7 @@ export type MaterialUse = "yes" | "no";
 export type MaterialUseVerdict = {
   used: MaterialUse;
   /**
-   * Confidence in a "yes": the length of the longest distinctive shared token
+   * Confidence in a "yes": the length of the longest qualifying shared token
    * run (consecutive content tokens appearing in order in both texts). 0 for a
    * "no". A single shared distinctive token is weak; a run of 3+ is strong.
    */
@@ -80,10 +80,17 @@ export function distinctiveTokens(text: string): string[] {
  * fine and deterministic.
  */
 export function longestSharedRun(needle: string[], haystack: string[]): string[] {
-  if (needle.length === 0 || haystack.length === 0) {
-    return [];
-  }
   let best: string[] = [];
+  for (const run of sharedRuns(needle, haystack)) {
+    if (run.length > best.length) {
+      best = run;
+    }
+  }
+  return best;
+}
+
+/** Enumerate full shared runs without removing excluded tokens or joining gaps. */
+function* sharedRuns(needle: string[], haystack: string[]): Generator<string[]> {
   for (let i = 0; i < needle.length; i++) {
     for (let j = 0; j < haystack.length; j++) {
       let k = 0;
@@ -94,24 +101,53 @@ export function longestSharedRun(needle: string[], haystack: string[]): string[]
       ) {
         k++;
       }
-      if (k > best.length) {
-        best = needle.slice(i, i + k);
+      if (k > 0) {
+        yield needle.slice(i, i + k);
       }
     }
   }
-  return best;
 }
 
+export type MaterialUseContext = {
+  /** Optional for compatibility with callers that have only the memory text. */
+  memoryId?: string;
+  /** Distinctive tokens from the user's prompt, kept only in the pending turn. */
+  promptTokens?: ReadonlySet<string>;
+};
+
+// Deliberately short, literal sentence-level guard; not a relevance classifier.
+const DISMISSAL = /\b(?:not\s+relevant|irrelevant|nothing\s+relevant|none\s+of\s+them|unrelated|doesn't\s+apply|did\s+not\s+apply|no\s+bearing|not\s+useful|off-topic|false\s+positive)\b/i;
+
 /**
- * Did the reply materially use the recalled memory? Conservative: requires a
- * run of MIN_RUN consecutive distinctive tokens shared, in order, between the
- * memory text and the reply. Returns the verdict plus the evidence run so a
- * labeling pass can audit every "yes".
+ * Require MIN_RUN shared distinctive tokens beyond the id's topic and the
+ * user's prompt. Excluded tokens remain in the shared sequence so mismatches
+ * cannot be spliced away. Dismissed sentences supply no evidence. Score and
+ * evidence retain the full qualifying run for auditing, as before.
  */
-export function assessMaterialUse(memoryText: string, replyText: string): MaterialUseVerdict {
-  const run = longestSharedRun(distinctiveTokens(memoryText), distinctiveTokens(replyText));
-  if (run.length >= MIN_RUN) {
-    return { used: "yes", score: run.length, evidence: run.join(" ") };
+export function assessMaterialUse(
+  memoryText: string,
+  replyText: string,
+  context: MaterialUseContext = {},
+): MaterialUseVerdict {
+  const slug = context.memoryId?.replace(/^mem:\d{4}-\d{2}-\d{2}-/, "") ?? "";
+  const excluded = new Set([...distinctiveTokens(slug), ...(context.promptTokens ?? [])]);
+  const memoryTokens = distinctiveTokens(memoryText);
+  let best: string[] = [];
+
+  for (const sentence of replyText.split(/[.!?]+/)) {
+    if (DISMISSAL.test(sentence.replace(/’/g, "'"))) {
+      continue;
+    }
+    for (const run of sharedRuns(memoryTokens, distinctiveTokens(sentence))) {
+      const qualifying = run.filter((token) => !excluded.has(token)).length;
+      if (qualifying >= MIN_RUN && run.length > best.length) {
+        best = run;
+      }
+    }
+  }
+
+  if (best.length >= MIN_RUN) {
+    return { used: "yes", score: best.length, evidence: best.join(" ") };
   }
   return { used: "no", score: 0, evidence: "" };
 }

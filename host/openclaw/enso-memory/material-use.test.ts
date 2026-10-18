@@ -61,6 +61,75 @@ describe("assessMaterialUse", () => {
     expect(v.evidence).toContain("livetopology");
   });
 
+  const memoryId = "mem:2026-08-10-hold-bug-report-internal-context-envelope";
+  const memory = "Matt decided on 2026-08-10 to hold off filing an OpenClaw bug report about the internal context envelope pending a verified repro.";
+
+  it.each([
+    "The recall block above your message was the internal-context envelope note, the Dross reconciliation, and the Night Shift entry. None of them was relevant.",
+    `the plugin credited the note about the "internal context envelope" bug as materially used in my last reply and marked it ... my reply mentioned that note only to say it wasn't relevant`,
+    "The internal context envelope came up.",
+  ])("NO: mentioning the memory's topic is insufficient: %s", (reply) => {
+    expect(assessMaterialUse(memory, reply, { memoryId }))
+      .toEqual({ used: "no", score: 0, evidence: "" });
+  });
+
+  it("YES: the held filing decision supplies content beyond the slug", () => {
+    const verdict = assessMaterialUse(memory, "Filing was held pending a verified repro.", { memoryId });
+    expect(verdict).toEqual({ used: "yes", score: 3, evidence: "pending verified repro" });
+  });
+
+  it("NO: quoting the user's prompt provides no new evidence", () => {
+    const promptTokens = new Set(distinctiveTokens("Was filing pending a verified repro?"));
+    expect(assessMaterialUse(memory, "It was pending a verified repro.", { memoryId, promptTokens }))
+      .toEqual({ used: "no", score: 0, evidence: "" });
+  });
+
+  it("counts only novel non-slug tokens within a full shared run", () => {
+    const context = {
+      memoryId: "mem:2026-08-10-topic",
+      promptTokens: new Set(["echo"]),
+    };
+    expect(assessMaterialUse("alpha topic beta echo", "alpha topic beta echo", context).used).toBe("no");
+    expect(assessMaterialUse("alpha topic beta echo gamma", "alpha topic beta echo gamma", context))
+      .toEqual({ used: "yes", score: 5, evidence: "alpha topic beta echo gamma" });
+  });
+
+  it.each(["topic", "echo"])("does not splice excluded %s tokens out to create a run", (excluded) => {
+    expect(assessMaterialUse("alpha beta gamma", `alpha ${excluded} beta gamma`, {
+      memoryId: "mem:2026-08-10-topic",
+      promptTokens: new Set(["echo"]),
+    }).used).toBe("no");
+  });
+
+  it("can find a qualifying run even when the longest run is excluded", () => {
+    expect(assessMaterialUse(
+      "internal context envelope bug report; pending verified repro",
+      "Internal context envelope bug report. Pending a verified repro.",
+      { memoryId },
+    )).toEqual({ used: "yes", score: 3, evidence: "pending verified repro" });
+  });
+
+  it.each([
+    "not relevant", "irrelevant", "nothing relevant", "none of them", "unrelated",
+    "doesn't apply", "doesn’t apply", "did not apply", "no bearing", "not useful", "off-topic", "false positive",
+  ])("NO: a genuine-looking run in a dismissal sentence (%s)", (marker) => {
+    expect(assessMaterialUse(memory, `Pending a verified repro — ${marker.toUpperCase()}.`, { memoryId }))
+      .toEqual({ used: "no", score: 0, evidence: "" });
+  });
+
+  it("recognizes a dismissal in the same sentence across a line wrap", () => {
+    expect(assessMaterialUse(memory, "Pending a verified repro\nis not relevant.", { memoryId }).used).toBe("no");
+  });
+
+  it("scopes dismissals to their sentence, allowing a separate genuine use", () => {
+    expect(assessMaterialUse(memory, "The weather is unrelated. Filing was held pending a verified repro.", { memoryId }))
+      .toEqual({ used: "yes", score: 3, evidence: "pending verified repro" });
+  });
+
+  it("does not manufacture evidence across sentence boundaries", () => {
+    expect(assessMaterialUse(memory, "Pending. Verified repro.", { memoryId }).used).toBe("no");
+  });
+
   it("NO: same topic, no distinctive run (shared single word only)", () => {
     // Both mention 'latency' but the reply draws on nothing distinctive from
     // the memory — this is the classic false-positive the matcher must reject.

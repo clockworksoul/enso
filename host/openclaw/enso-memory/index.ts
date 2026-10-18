@@ -30,7 +30,7 @@ import {
   type ShadowRecord,
   type TurnIdContext,
 } from "./shadow-log.js";
-import { assessMaterialUse } from "./material-use.js";
+import { assessMaterialUse, distinctiveTokens } from "./material-use.js";
 import { recordOutcome } from "./status.js";
 
 /**
@@ -40,23 +40,28 @@ import { recordOutcome } from "./status.js";
  * `llm_output` hook has the reply but not the recalled memory CONTENT (the
  * persistent log stores only ids+scores, to stay bounded and content-free).
  * So at recall time we stash the full recalled content keyed by the turn's
- * runId, and at `llm_output` time we consume it to score material use, then
- * evict. This keeps memory content out of the JSONL while still deriving the
+ * runId along with prompt tokens (also never persisted). At `llm_output` time
+ * we consume it to score material use, then evict. This keeps memory content out of the JSONL while still deriving the
  * RECALL-DEF label. The map is bounded and evicts oldest-first so a turn that
  * never reaches `llm_output` (error, cancel) cannot leak unboundedly.
  */
-type PendingRecall = { at: number; memories: Array<{ id: string; content: string }> };
+type PendingRecall = {
+  at: number;
+  memories: Array<{ id: string; content: string }>;
+  promptTokens: ReadonlySet<string>;
+};
 const MAX_PENDING_TURNS = 256;
 
 function rememberRecall(
   pending: Map<string, PendingRecall>,
   turn: string,
   memories: Array<{ id: string; content: string }>,
+  promptTokens: ReadonlySet<string>,
 ): void {
   if (memories.length === 0) {
     return;
   }
-  pending.set(turn, { at: Date.now(), memories });
+  pending.set(turn, { at: Date.now(), memories, promptTokens });
   while (pending.size > MAX_PENDING_TURNS) {
     const oldest = pending.keys().next().value;
     if (oldest === undefined) {
@@ -225,6 +230,7 @@ async function shadowRecall(
       pending,
       turn,
       outcome.output.results.map((r) => ({ id: r.id, content: r.content })),
+      new Set(distinctiveTokens(queryText)),
     );
   }
   return { record, outcome, prependContext: injection?.prependContext };
@@ -294,7 +300,10 @@ function observeReplyUse(
     ? ev.assistantTexts.filter((t): t is string => typeof t === "string").join("\n")
     : "";
   const verdicts: ReplyUseVerdict[] = recalled.memories.map((m) => {
-    const v = assessMaterialUse(m.content, replyText);
+    const v = assessMaterialUse(m.content, replyText, {
+      memoryId: m.id,
+      promptTokens: recalled.promptTokens,
+    });
     return {
       id: m.id,
       used: v.used,
