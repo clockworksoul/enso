@@ -137,6 +137,41 @@ function readStatusFile(shadowLogDir: string): unknown {
 }
 
 describe("memory-enso plugin entry", () => {
+  it.each(["cron", "heartbeat"])("skips recall and injection for %s turns", async (trigger) => {
+    const shadowLogDir = tmpDir();
+    const recall = vi.spyOn(bridge, "runEnsoRecall").mockRejectedValue(new Error("unexpected recall"));
+    const { hooks, warnings } = registerPlugin({ shadowLogDir, liveRecall: true });
+
+    expect(await hooks.get("before_prompt_build")?.(
+      { prompt: "Check the pending verified repro" },
+      { trigger, runId: "automated-run" },
+    )).toBeUndefined();
+    await hooks.get("llm_output")?.(
+      { runId: "automated-run", assistantTexts: ["Pending verified repro"] },
+      {},
+    );
+
+    expect(recall).not.toHaveBeenCalled();
+    expect(bridge.runEnsoMarkRecalled).not.toHaveBeenCalled();
+    expect(readRecords(shadowLogDir)).toEqual([]);
+    expect(readStatusFile(shadowLogDir)).toBeUndefined();
+    expect(warnings).toEqual([]);
+  });
+
+  it.each(["user", "future-trigger", undefined])("recalls for trigger %s, regardless of prompt wording", async (trigger) => {
+    const recall = vi.spyOn(bridge, "runEnsoRecall").mockResolvedValue({
+      ok: false, error: "test failure", spawnMs: 0,
+    });
+    const { hooks } = registerPlugin({ shadowLogDir: tmpDir() });
+
+    await hooks.get("before_prompt_build")?.(
+      { prompt: "cron heartbeat: check pending verified repro" },
+      trigger === undefined ? undefined : { trigger },
+    );
+
+    expect(recall).toHaveBeenCalledOnce();
+  });
+
   it("registers both observation hooks, the reply-use observer, and the manual tool", () => {
     const { hooks, tools } = registerPlugin({ shadowLogDir: tmpDir() });
     expect(hooks.has("before_prompt_build")).toBe(true);
@@ -451,6 +486,24 @@ describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)"
       .toMatchObject({ used: "no", reply_use: [{ used: "no", score: 0 }] });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(bridge.runEnsoMarkRecalled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { prompt: "What was decided?", reply: "Filing was held pending a verified repro.", used: "yes" },
+    { prompt: "Was it pending a verified repro?", reply: "It was pending a verified repro.", used: "no" },
+    { prompt: "What was decided?", reply: "Pending a verified repro isn't relevant; ignoring Ensō.", used: "no" },
+  ])("labels long-slug recall $used and reinforces accordingly", async ({ prompt, reply, used }) => {
+    const shadowLogDir = tmpDir();
+    const id = "mem:2026-10-12-filing-held-pending-verified-repro-internal-context-envelope-bug-report";
+    const ensoBinary = fakeBridge([{ id, content: "Filing held pending verified repro" }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary });
+
+    await runTurn(hooks, "long-slug", prompt, [reply]);
+
+    expect(readRecords(shadowLogDir).find((r) => r.kind === "reply_use"))
+      .toMatchObject({ used, reply_use: [{ id, used }] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).toHaveBeenCalledTimes(used === "yes" ? 1 : 0);
   });
 
   it.each([

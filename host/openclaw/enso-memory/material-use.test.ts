@@ -84,6 +84,17 @@ describe("assessMaterialUse", () => {
       .toEqual({ used: "no", score: 0, evidence: "" });
   });
 
+  it.each([8, 9])("uses the short-slug exclusion only through eight tokens (%i)", (count) => {
+    const words = "alpha beta gamma delta epsilon zeta theta kappa lambda".split(" ").slice(0, count);
+    const text = words.join(" ");
+    const context = { memoryId: `mem:2026-10-12-${words.join("-")}` };
+
+    expect(assessMaterialUse(text, text, context).used).toBe(count === 8 ? "no" : "yes");
+    expect(assessMaterialUse(text, text, {
+      ...context, promptTokens: new Set(words),
+    }).used).toBe("no");
+  });
+
   it("counts only novel non-slug tokens within a full shared run", () => {
     const context = {
       memoryId: "mem:2026-08-10-topic",
@@ -112,9 +123,21 @@ describe("assessMaterialUse", () => {
   it.each([
     "not relevant", "irrelevant", "nothing relevant", "none of them", "unrelated",
     "doesn't apply", "doesn’t apply", "did not apply", "no bearing", "not useful", "off-topic", "false positive",
+    "not applicable", "not related", "doesn't bear on this", "doesn’t bear on this",
+    "isn't relevant", "isn’t relevant", "wasn't relevant", "no relevant memory", "not pertinent",
+    "ignoring the recall", "ignoring the recalled context", "ignoring Ensō",
+    "nothing needs the recalled context", "the recalled context is stale", "stale recall",
   ])("NO: a genuine-looking run in a dismissal sentence (%s)", (marker) => {
     expect(assessMaterialUse(memory, `Pending a verified repro — ${marker.toUpperCase()}.`, { memoryId }))
       .toEqual({ used: "no", score: 0, evidence: "" });
+  });
+
+  it.each([
+    "Pending a verified repro; nothing needs changing",
+    "Pending a verified repro prevents stale deployments",
+    "Pending a verified repro while ignoring the weather",
+  ])("YES: ordinary use is not a recall dismissal (%s)", (reply) => {
+    expect(assessMaterialUse(memory, reply, { memoryId }).used).toBe("yes");
   });
 
   it("recognizes a dismissal in the same sentence across a line wrap", () => {

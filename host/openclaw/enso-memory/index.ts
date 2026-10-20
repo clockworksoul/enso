@@ -364,11 +364,15 @@ export default definePluginEntry({
     // once before logging, containing formatting failures inside shadowRecall.
     api.on("before_prompt_build", async (event: unknown, ctx: unknown) => {
       try {
+        const agentCtx = ctx as { sessionKey?: unknown; trigger?: unknown } & TurnIdContext | undefined;
+        // Host-supplied PluginHookAgentContext.trigger; never infer origin from text.
+        if (agentCtx?.trigger === "cron" || agentCtx?.trigger === "heartbeat") {
+          return;
+        }
         const prompt = asText((event as { prompt?: unknown } | undefined)?.prompt);
         if (prompt.trim() === "") {
           return;
         }
-        const agentCtx = ctx as { sessionKey?: unknown } & TurnIdContext | undefined;
         const session = asText(agentCtx?.sessionKey);
         const { prependContext } = await shadowRecall(
           api,

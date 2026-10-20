@@ -115,11 +115,12 @@ export type MaterialUseContext = {
   promptTokens?: ReadonlySet<string>;
 };
 
-// Deliberately short, literal sentence-level guard; not a relevance classifier.
-const DISMISSAL = /\b(?:not\s+relevant|irrelevant|nothing\s+relevant|none\s+of\s+them|unrelated|doesn't\s+apply|did\s+not\s+apply|no\s+bearing|not\s+useful|off-topic|false\s+positive)\b/i;
+// Literal sentence-level guard; not a relevance classifier.
+// Scope "nothing needs", "ignoring", and "stale" to recall to preserve ordinary use.
+const DISMISSAL = /\b(?:not\s+(?:relevant|applicable|related|pertinent|useful)|irrelevant|nothing\s+relevant|none\s+of\s+them|unrelated|doesn't\s+(?:apply|bear\s+on)|did\s+not\s+apply|(?:isn't|wasn't)\s+relevant|no\s+(?:bearing|relevant\s+memor(?:y|ies))|off-topic|false\s+positive|ignoring\s+(?:the\s+)?(?:recall(?:ed)?|ens[oō])|nothing\s+needs\s+(?:this|the)\s+recall(?:ed\s+context)?|(?:recall(?:ed\s+context)?|memor(?:y|ies))\s+(?:is|are)\s+stale|stale\s+(?:recall|memor(?:y|ies)))(?!\w)/i;
 
 /**
- * Require MIN_RUN shared distinctive tokens beyond the id's topic and the
+ * Require MIN_RUN shared distinctive tokens beyond a short id's topic and the
  * user's prompt. Excluded tokens remain in the shared sequence so mismatches
  * cannot be spliced away. Dismissed sentences supply no evidence. Score and
  * evidence retain the full qualifying run for auditing, as before.
@@ -130,7 +131,10 @@ export function assessMaterialUse(
   context: MaterialUseContext = {},
 ): MaterialUseVerdict {
   const slug = context.memoryId?.replace(/^mem:\d{4}-\d{2}-\d{2}-/, "") ?? "";
-  const excluded = new Set([...distinctiveTokens(slug), ...(context.promptTokens ?? [])]);
+  const slugTokens = distinctiveTokens(slug);
+  // Short IDs name a topic; long backfilled slugs often repeat the entire entry.
+  // Excluding only short slugs preserves content evidence without counting prompt echoes.
+  const excluded = new Set([...(slugTokens.length <= 8 ? slugTokens : []), ...(context.promptTokens ?? [])]);
   const memoryTokens = distinctiveTokens(memoryText);
   let best: string[] = [];
 
