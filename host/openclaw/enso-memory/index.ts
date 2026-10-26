@@ -128,6 +128,8 @@ function safeRecordOutcome(
   }
 }
 
+const LIVE_RECALL_MIN_RELEVANCE = 0.5;
+
 /** Presentation gate only: retain core ranking, bound per-turn context. */
 function liveRecallSelection(
   cfg: MemoryEnsoConfig,
@@ -135,7 +137,9 @@ function liveRecallSelection(
 ): { prependContext: string; ids: string[] } | undefined {
   const memories = results
     .filter((r) => typeof r.score === "number" && Number.isFinite(r.score) &&
-      r.score >= cfg.liveRecallMinScore && r.score <= 1)
+      r.score >= cfg.liveRecallMinScore && r.score <= 1 &&
+      typeof r.relevance === "number" && Number.isFinite(r.relevance) &&
+      r.relevance >= LIVE_RECALL_MIN_RELEVANCE)
     .slice(0, Math.min(cfg.topK, 3))
     .map((r) => ({ id: r.id, content: truncateText(r.content.trim().replace(/\s+/g, " ")) }))
     .filter((r) => r.content !== "");
@@ -365,15 +369,16 @@ export default definePluginEntry({
     api.on("before_prompt_build", async (event: unknown, ctx: unknown) => {
       try {
         const agentCtx = ctx as { sessionKey?: unknown; trigger?: unknown } & TurnIdContext | undefined;
-        // Host-supplied PluginHookAgentContext.trigger; never infer origin from text.
-        if (agentCtx?.trigger === "cron" || agentCtx?.trigger === "heartbeat") {
+        // Host-supplied trigger and session identifier; never infer origin from text.
+        const session = asText(agentCtx?.sessionKey);
+        if (agentCtx?.trigger === "cron" || agentCtx?.trigger === "heartbeat" ||
+          session.includes(":subagent:")) {
           return;
         }
         const prompt = asText((event as { prompt?: unknown } | undefined)?.prompt);
         if (prompt.trim() === "") {
           return;
         }
-        const session = asText(agentCtx?.sessionKey);
         const { prependContext } = await shadowRecall(
           api,
           cfg,
