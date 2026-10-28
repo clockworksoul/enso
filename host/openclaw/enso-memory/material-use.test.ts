@@ -51,6 +51,30 @@ describe("longestSharedRun", () => {
 });
 
 describe("assessMaterialUse", () => {
+  const case27Memory = "Essay #4 pronoun fix: Matt caught we/our when referring to humans. Fixed 3 instances across the essay; important voice consistency for an AI author.";
+  const case27Id = "mem:2026-10-12-essay-4-pronoun-fix-matt-caught-weour-when-referring-to-humans-fixed-3-instances-across-the-essay-important-voice-consistency-for-an-ai-author";
+  const case27Reply = `On the recall block, it was all about Essay #4: the pronoun fix, the Substack launch and your "beautiful and powerful." None of it bears on a reaction to the story, though the pronoun note is a fair reminder that I shouldn't say "we" for humans. I didn't use it.`;
+
+  it("NO: case 27 explicitly dismisses the recalled context later in the paragraph", () => {
+    expect(assessMaterialUse(case27Memory, case27Reply, { memoryId: case27Id }))
+      .toEqual({ used: "no", score: 0, evidence: "" });
+  });
+
+  it.each(["didn't use", "didn’t use", "did not use", "haven't used", "have not used"])("NO: explicit non-use wins within a recall paragraph (%s)", (marker) => {
+    expect(assessMaterialUse(case27Memory, `Essay #4 pronoun fix. I ${marker} it.`, { memoryId: case27Id }).used)
+      .toBe("no");
+  });
+
+  it("YES: normal use of the case 27 content still counts", () => {
+    expect(assessMaterialUse(case27Memory, "The Essay #4 pronoun fix reminds me to avoid we/our for humans.", { memoryId: case27Id }).used)
+      .toBe("yes");
+  });
+
+  it("keeps explicit non-use scoped to its paragraph", () => {
+    expect(assessMaterialUse(case27Memory, `I didn't use it.\n\nThe Essay #4 pronoun fix guides my wording.`, { memoryId: case27Id }).used)
+      .toBe("yes");
+  });
+
   it("YES: the reply reuses a distinctive phrase from the recalled memory", () => {
     const memory = "Omega livetopology aggregate rewrite shipped on the dross branch";
     const reply =

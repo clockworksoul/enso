@@ -119,10 +119,16 @@ export type MaterialUseContext = {
 // Scope "nothing needs", "ignoring", and "stale" to recall to preserve ordinary use.
 const DISMISSAL = /\b(?:not\s+(?:relevant|applicable|related|pertinent|useful)|irrelevant|nothing\s+relevant|none\s+of\s+them|unrelated|doesn't\s+(?:apply|bear\s+on)|did\s+not\s+apply|(?:isn't|wasn't)\s+relevant|no\s+(?:bearing|relevant\s+memor(?:y|ies))|off-topic|false\s+positive|ignoring\s+(?:the\s+)?(?:recall(?:ed)?|ens[oō])|nothing\s+needs\s+(?:this|the)\s+recall(?:ed\s+context)?|(?:recall(?:ed\s+context)?|memor(?:y|ies))\s+(?:is|are)\s+stale|stale\s+(?:recall|memor(?:y|ies)))(?!\w)/i;
 
+// An explicit non-use statement can refer back to a mention in the preceding
+// sentence ("Essay #4: the pronoun fix. I didn't use it."). Keep its scope to
+// the paragraph; ordinary relevance dismissals remain sentence-scoped.
+const NON_USE = /\b(?:i|we)\s+(?:(?:didn't|did\s+not)\s+use|(?:haven't|have\s+not)\s+used)\s+(?:it|them|(?:the\s+)?(?:recall(?:ed)?\s+context|memor(?:y|ies)))\b/i;
+
 /**
  * Require MIN_RUN shared distinctive tokens beyond a short id's topic and the
  * user's prompt. Excluded tokens remain in the shared sequence so mismatches
- * cannot be spliced away. Dismissed sentences supply no evidence. Score and
+ * cannot be spliced away. Dismissed sentences and explicitly unused paragraphs
+ * supply no evidence. Score and
  * evidence retain the full qualifying run for auditing, as before.
  */
 export function assessMaterialUse(
@@ -138,7 +144,8 @@ export function assessMaterialUse(
   const memoryTokens = distinctiveTokens(memoryText);
   let best: string[] = [];
 
-  for (const sentence of replyText.split(/[.!?]+/)) {
+  const paragraphs = replyText.replace(/’/g, "'").split(/\r?\n\s*\r?\n/);
+  for (const sentence of paragraphs.filter((p) => !NON_USE.test(p)).flatMap((p) => p.split(/[.!?]+/))) {
     if (DISMISSAL.test(sentence.replace(/’/g, "'"))) {
       continue;
     }

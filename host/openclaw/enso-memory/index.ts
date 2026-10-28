@@ -129,13 +129,16 @@ function safeRecordOutcome(
 }
 
 const LIVE_RECALL_MIN_RELEVANCE = 0.5;
+const REINJECTION_WINDOW_MS = 3 * 60 * 60 * 1000;
 
 /** Presentation gate only: retain core ranking, bound per-turn context. */
 function liveRecallSelection(
   cfg: MemoryEnsoConfig,
   results: EnsoRecallResult[],
+  injected?: ReadonlyMap<string, number>,
 ): { prependContext: string; ids: string[] } | undefined {
   const memories = results
+    .filter((r) => !injected?.has(r.id))
     .filter((r) => typeof r.score === "number" && Number.isFinite(r.score) &&
       r.score >= cfg.liveRecallMinScore && r.score <= 1 &&
       typeof r.relevance === "number" && Number.isFinite(r.relevance) &&
@@ -166,6 +169,7 @@ async function shadowRecall(
   turnCtx: TurnIdContext | undefined,
   pending?: Map<string, PendingRecall>,
   allowInjection = false,
+  injectedBySession?: Map<string, Map<string, number>>,
 ): Promise<{ record: ShadowRecord; outcome: BridgeOutcome; prependContext?: string }> {
   const ts = nowISO();
   // WP-8 co-keying: prefer the host-authoritative runId (shared with the
@@ -191,7 +195,28 @@ async function shadowRecall(
   let injection: ReturnType<typeof liveRecallSelection>;
   if (allowInjection && cfg.liveRecall) {
     try {
-      injection = liveRecallSelection(cfg, outcome.output.results);
+      const now = Date.now();
+      // Expire inactive sessions too; the main session key can live for days.
+      for (const [key, memories] of injectedBySession ?? []) {
+        for (const [id, at] of memories) {
+          if (now - at >= REINJECTION_WINDOW_MS) {
+            memories.delete(id);
+          }
+        }
+        if (memories.size === 0) {
+          injectedBySession?.delete(key);
+        }
+      }
+
+      const injected = session === undefined ? undefined : injectedBySession?.get(session);
+      injection = liveRecallSelection(cfg, outcome.output.results, injected);
+      if (injection !== undefined && session !== undefined && injectedBySession !== undefined) {
+        const memories = injected ?? new Map<string, number>();
+        for (const id of injection.ids) {
+          memories.set(id, now);
+        }
+        injectedBySession.set(session, memories);
+      }
     } catch (error) {
       api.logger.warn(`memory-enso: shadow hook contained failure: ${String(error)}`);
     }
@@ -362,6 +387,7 @@ export default definePluginEntry({
     // WP-8 blocker (a): per-turn bridge from recall (before_prompt_build) to
     // reply (llm_output). Keyed by the host runId both hooks share.
     const pendingRecalls = new Map<string, PendingRecall>();
+    const injectedBySession = new Map<string, Map<string, number>>();
 
     // Shadow side A — Ensō's answer for the same turn the slot owner serves.
     // Observation-only unless liveRecall is explicitly enabled. Compute context
@@ -387,6 +413,7 @@ export default definePluginEntry({
           agentCtx,
           pendingRecalls,
           true,
+          injectedBySession,
         );
         if (prependContext !== undefined) {
           return { prependContext };

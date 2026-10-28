@@ -137,6 +137,30 @@ function readStatusFile(shadowLogDir: string): unknown {
 }
 
 describe("memory-enso plugin entry", () => {
+  it("injects each id once per session within three hours, retaining skipped ids in shadow results", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const shadowLogDir = tmpDir();
+    const ensoBinary = fakeBridge([
+      { id: "mem:first", content: "First memory", score: 0.8, relevance: 0.8 },
+      { id: "mem:second", content: "Second memory", score: 0.8, relevance: 0.8 },
+    ]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, liveRecall: true, topK: 1 });
+    const recall = (sessionKey: string) => hooks.get("before_prompt_build")?.({ prompt: "q" }, { sessionKey });
+
+    expect(await recall("s1")).toMatchObject({ prependContext: expect.stringContaining("First memory") });
+    expect(await recall("s1")).toMatchObject({ prependContext: expect.stringContaining("Second memory") });
+    expect(await recall("s1")).toBeUndefined();
+    expect(await recall("s2")).toMatchObject({ prependContext: expect.stringContaining("First memory") });
+    clock.mockReturnValue(1_000_000 + 3 * 60 * 60 * 1000 - 1);
+    expect(await recall("s1")).toBeUndefined();
+    clock.mockReturnValue(1_000_000 + 3 * 60 * 60 * 1000);
+    expect(await recall("s1")).toMatchObject({ prependContext: expect.stringContaining("First memory") });
+
+    const skipped = readRecords(shadowLogDir)[2];
+    expect(skipped).toMatchObject({ injected: false, injected_ids: [] });
+    expect(skipped?.enso?.results.map((r) => r.id)).toEqual(["mem:first", "mem:second"]);
+  });
+
   it.each([
     { trigger: "cron" },
     { trigger: "heartbeat" },
@@ -497,6 +521,32 @@ describe("opt-in live recall", () => {
 });
 
 describe("WP-8 blocker (a): reply-use RECALL-DEF labeling (llm_output observer)", () => {
+  it("does not reinforce case 27's explicitly unused pronoun memory", async () => {
+    const shadowLogDir = tmpDir();
+    const id = "mem:2026-10-12-essay-4-pronoun-fix-matt-caught-weour-when-referring-to-humans-fixed-3-instances-across-the-essay-important-voice-consistency-for-an-ai-author";
+    const ensoBinary = fakeBridge([{
+      id,
+      content: "Essay #4 pronoun fix: Matt caught we/our when referring to humans. Fixed 3 instances across the essay; important voice consistency for an AI author.",
+      score: 0.4,
+      relevance: 0.63,
+    }]);
+    const { hooks } = registerPlugin({ shadowLogDir, ensoBinary, liveRecall: true, liveRecallMinScore: 0.3 });
+    const injected = await hooks.get("before_prompt_build")?.(
+      { prompt: "I love your fiction piece!" },
+      { sessionKey: "agent:main:main", runId: "case-27" },
+    );
+    expect(injected).toMatchObject({ prependContext: expect.stringContaining("pronoun fix") });
+    await hooks.get("llm_output")?.({
+      runId: "case-27",
+      assistantTexts: [`On the recall block, it was all about Essay #4: the pronoun fix, the Substack launch and your "beautiful and powerful." None of it bears on a reaction to the story, though the pronoun note is a fair reminder that I shouldn't say "we" for humans. I didn't use it.`],
+    }, {});
+
+    expect(readRecords(shadowLogDir).find((r) => r.kind === "reply_use"))
+      .toMatchObject({ used: "no", reply_use: [{ id, used: "no", score: 0 }] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bridge.runEnsoMarkRecalled).not.toHaveBeenCalled();
+  });
+
   async function runTurn(
     hooks: Map<string, HookHandler>,
     runId: string,
